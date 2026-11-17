@@ -6,6 +6,7 @@ import * as Icons from 'lucide-react'
 import { createId, exportCsv, exportLegacyRawMaterialMigration, formatDate, money } from '@/lib/erp'
 import {
   adjustRawMaterialStock,
+  listBakeryProductionBatches,
   configureRawMaterialLocation,
   createProductionMaterial,
   deleteProductionMaterial,
@@ -28,10 +29,11 @@ import {
   type RawMovementRecord,
   type RawMaterialCountRecord,
   type RawMaterialLotRecord,
+  type BakeryBatchRecord,
   submitRawMaterialCount,
 } from '@/lib/user-api'
 
-type View = 'Inventory' | 'Lots' | 'Stock-in history' | 'Daily production use' | 'Packaging' | 'All movements' | 'Low stock'
+type View = 'Inventory' | 'Lots' | 'Stock-in history' | 'Bakery production use' | 'Daily production use' | 'Packaging' | 'All movements' | 'Low stock'
 type Dialog = 'material' | 'editMaterial' | 'deleteMaterial' | 'receipt' | 'adjustment' | 'transfer' | 'location' | null
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kampala', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const inputClass = 'mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-ring/30 disabled:bg-slate-50 disabled:text-slate-400'
@@ -138,6 +140,7 @@ export default function RawMaterialManagement({
   const [usageFrom, setUsageFrom] = useState('')
   const [usageTo, setUsageTo] = useState('')
   const [usageProductFilter, setUsageProductFilter] = useState('')
+  const [bakeryFamilyFilter, setBakeryFamilyFilter] = useState('')
   const [expandedUsageId, setExpandedUsageId] = useState('')
   const [message, setMessage] = useState('')
   const [messageTone, setMessageTone] = useState<MessageTone>('info')
@@ -148,7 +151,7 @@ export default function RawMaterialManagement({
   const workspace = useQuery({
     queryKey,
     queryFn: async () => {
-      const [materials, movements, receipts, usages, alerts, users, lots] = await Promise.all([
+      const [materials, movements, receipts, usages, alerts, users, lots, batches] = await Promise.all([
         listProductionMaterials(),
         listProductionMaterialMovements(),
         listProductionMaterialReceipts(),
@@ -156,6 +159,7 @@ export default function RawMaterialManagement({
         listRawMaterialAlerts(),
         listInventoryResponsibleUsers(),
         listProductionMaterialLots({ limit: 200 }),
+        listBakeryProductionBatches(),
       ])
       return {
         materials: materials.materials,
@@ -165,6 +169,7 @@ export default function RawMaterialManagement({
         alerts: alerts.alerts,
         users: users.users,
         lots: lots.lots,
+        batches: batches.batches,
       }
     },
   })
@@ -181,6 +186,7 @@ export default function RawMaterialManagement({
   const alerts = data?.alerts ?? []
   const users = data?.users ?? []
   const lots = data?.lots ?? []
+  const batches = data?.batches ?? []
   const locations = [...new Set(materials.flatMap((material) => material.locations.map((balance) => balance.location)))].sort()
   const visibleUsages = useMemo(() => {
     const period = usagePeriodRange(usagePeriod)
@@ -192,6 +198,17 @@ export default function RawMaterialManagement({
       && (!to || usage.productionDate <= to),
     ).sort((left, right) => right.productionDate.localeCompare(left.productionDate) || right.createdAt.localeCompare(left.createdAt))
   }, [usages, usagePeriod, usageFrom, usageTo, usageProductFilter])
+  const visibleBakeryBatches = useMemo(() => {
+    const period = usagePeriodRange(usagePeriod)
+    const from = usageFrom || period.from
+    const to = usageTo || period.to
+    return batches.filter((batch) =>
+      batch.status === 'completed'
+      && (!bakeryFamilyFilter || batch.familyId === bakeryFamilyFilter)
+      && (!from || batch.productionDate >= from)
+      && (!to || batch.productionDate <= to),
+    ).sort((left, right) => right.productionDate.localeCompare(left.productionDate) || right.reference.localeCompare(left.reference))
+  }, [batches, usagePeriod, usageFrom, usageTo, bakeryFamilyFilter])
 
   const visibleMaterials = useMemo(() => materials.filter((material) => {
     const text = `${material.name} ${material.code} ${material.category} ${material.unit} ${material.locations.map((balance) => balance.location).join(' ')}`.toLowerCase()
@@ -435,6 +452,27 @@ export default function RawMaterialManagement({
         lines: receipt.rows.map((movement) => `${movement.materialName}: ${movement.receiptPackaging ? `${movement.receiptPackaging.packageQuantity} ${movement.receiptPackaging.packageUnit} (${movement.quantity} ${movement.unit})` : `${movement.quantity} ${movement.unit}`}`).join('; '),
         quantity: receipt.quantity, valueUGX: receipt.value,
       })))
+    } else if (view === 'Bakery production use') {
+      exportCsv('bakery-production-material-use.csv', visibleBakeryBatches.flatMap((batch) => {
+        const lines = [
+          ...batch.ingredients
+            .filter((line) => line.actualQuantity > 0)
+            .map((line) => ({ materialName: line.materialName, quantity: line.actualQuantity, unit: line.unit, lotAllocations: line.lotAllocations ?? [] })),
+          ...batch.outputs.flatMap((output) => (output.packagingMaterials ?? [])
+            .filter((line) => line.actualQuantity > 0)
+            .map((line) => ({ materialName: line.materialName, quantity: line.actualQuantity, unit: line.unit, lotAllocations: line.lotAllocations }))),
+        ]
+        return lines.map((line) => ({
+          date: batch.productionDate,
+          batch: batch.reference,
+          productFamily: batch.familyName,
+          location: batch.location,
+          material: line.materialName,
+          quantity: line.quantity,
+          unit: line.unit,
+          lots: line.lotAllocations.map((lot) => `${lot.internalLotCode}: ${lot.quantity} ${line.unit}`).join('; '),
+        }))
+      }))
     } else if (view === 'Daily production use') {
       exportCsv('daily-raw-material-use.csv', visibleUsages.map((usage) => ({
         date: usage.productionDate, reference: usage.reference, product: usage.productName,
@@ -493,17 +531,17 @@ export default function RawMaterialManagement({
 
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div role="tablist" aria-label="Raw material views" className="flex gap-1 overflow-x-auto border-b border-slate-200 px-4 pt-2">
-        {(['Inventory', 'Lots', 'Stock-in history', 'Daily production use', 'Packaging', 'All movements', 'Low stock'] as View[]).map((item) => <button key={item} type="button" role="tab" aria-selected={view === item} onClick={() => setView(item)} className={`shrink-0 border-b-2 px-3 py-3 text-xs font-semibold ${view === item ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{item === 'Daily production use' ? 'Legacy usage history' : item}<span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{item === 'Inventory' ? materials.length : item === 'Lots' ? lots.length : item === 'Stock-in history' ? receiptGroups.length : item === 'Daily production use' ? usages.length : item === 'Packaging' ? physicalCounts.data?.counts.length ?? 0 : item === 'All movements' ? movements.length : alerts.length}</span></button>)}
+        {(['Inventory', 'Lots', 'Stock-in history', 'Bakery production use', 'Daily production use', 'Packaging', 'All movements', 'Low stock'] as View[]).map((item) => <button key={item} type="button" role="tab" aria-selected={view === item} onClick={() => setView(item)} className={`shrink-0 border-b-2 px-3 py-3 text-xs font-semibold ${view === item ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{item === 'Daily production use' ? 'Legacy usage history' : item}<span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">{item === 'Inventory' ? materials.length : item === 'Lots' ? lots.length : item === 'Stock-in history' ? receiptGroups.length : item === 'Bakery production use' ? batches.filter((batch) => batch.status === 'completed').length : item === 'Daily production use' ? usages.length : item === 'Packaging' ? physicalCounts.data?.counts.length ?? 0 : item === 'All movements' ? movements.length : alerts.length}</span></button>)}
       </div>
       <div className="flex flex-col gap-3 border-b border-slate-100 p-4 xl:flex-row xl:items-center xl:justify-between">
-        <div><h3 className="text-sm font-bold">{view === 'Daily production use' ? 'Legacy usage history' : view}</h3><p className="mt-1 text-xs text-slate-500">{view === 'Daily production use' ? `${visibleUsages.length} historical beverage records · read-only; new usage is recorded through production batches` : view === 'Packaging' ? 'Record physical packaging stock and reconcile ledger variances by location.' : view === 'Inventory' ? `${visibleMaterials.length} materials · balances are maintained per location` : view === 'Lots' ? `${visibleLots.length} supplier lots · production use allocates eligible lots by FEFO` : view === 'Stock-in history' ? `${receiptGroups.length} receipts` : view === 'Low stock' ? `${alerts.length} active alerts · in-app notifications are queued` : `${visibleMovements.length} movements`}</p></div>
-        {view !== 'Daily production use' && view !== 'Packaging' && <div className="flex flex-wrap gap-2">
+        <div><h3 className="text-sm font-bold">{view === 'Daily production use' ? 'Legacy usage history' : view}</h3><p className="mt-1 text-xs text-slate-500">{view === 'Bakery production use' ? `${visibleBakeryBatches.length} completed bakery batches · quantities come from actual ingredient and packaging usage` : view === 'Daily production use' ? `${visibleUsages.length} historical beverage records · read-only; new usage is recorded through production batches` : view === 'Packaging' ? 'Record physical packaging stock and reconcile ledger variances by location.' : view === 'Inventory' ? `${visibleMaterials.length} materials · balances are maintained per location` : view === 'Lots' ? `${visibleLots.length} supplier lots · production use allocates eligible lots by FEFO` : view === 'Stock-in history' ? `${receiptGroups.length} receipts` : view === 'Low stock' ? `${alerts.length} active alerts · in-app notifications are queued` : `${visibleMovements.length} movements`}</p></div>
+        {view !== 'Daily production use' && view !== 'Bakery production use' && view !== 'Packaging' && <div className="flex flex-wrap gap-2">
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2"><Icons.Search className="size-4 text-slate-400" /><input aria-label={`Search ${view}`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search material or reference" className="w-44 bg-transparent text-xs outline-none" /></label>
           {view === 'Inventory' || view === 'Lots' ? <select aria-label={`${view} location`} value={locationFilter} onChange={(event) => setLocationFilter(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"><option>All locations</option>{locations.map((location) => <option key={location}>{location}</option>)}</select> : view !== 'Low stock' && <><select aria-label="Filter movement type" value={movementFilter} onChange={(event) => setMovementFilter(event.target.value)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"><option>All movement types</option>{(['Opening balance', 'Receipt', 'Stock in', 'Stock out', 'Production use', 'Production use correction', 'Transfer', 'Adjustment increase', 'Adjustment decrease'] as RawMaterialMovementType[]).map((type) => <option key={type}>{type}</option>)}</select><input aria-label="From date" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-2 text-xs" /><input aria-label="To date" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="rounded-lg border border-slate-200 px-2 py-2 text-xs" /></>}
         </div>}
       </div>
 
-      {view !== 'Daily production use' && view !== 'Packaging' && <div className="flex justify-end gap-2 border-b border-slate-100 px-4 py-3">
+      {view !== 'Daily production use' && view !== 'Bakery production use' && view !== 'Packaging' && <div className="flex justify-end gap-2 border-b border-slate-100 px-4 py-3">
         {canEdit && view === 'Inventory' && <button type="button" onClick={() => { setDialog('material'); clearMessage() }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.PackagePlus className="size-4" /> Add material</button>}
         {canEdit && view === 'Stock-in history' && <button type="button" onClick={() => { setDialog('receipt'); clearMessage() }} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold"><Icons.ArrowDownToLine className="size-4" /> Record stock-in</button>}
         {canEdit && view === 'All movements' && <>
@@ -549,6 +587,19 @@ export default function RawMaterialManagement({
         expandedId={expandedUsageId}
         onToggleUsage={(id) => setExpandedUsageId((current) => current === id ? '' : id)}
         onDownloadUsage={downloadUsagePdf}
+      />}
+      {view === 'Bakery production use' && <BakeryProductionUseView
+        batches={visibleBakeryBatches}
+        period={usagePeriod}
+        onPeriod={(period) => { setUsagePeriod(period); setUsageFrom(''); setUsageTo(''); setUsageProductFilter('') }}
+        from={usageFrom}
+        onFrom={(value) => { setUsageFrom(value); setUsagePeriod('all') }}
+        to={usageTo}
+        onTo={(value) => { setUsageTo(value); setUsagePeriod('all') }}
+        familyFilter={bakeryFamilyFilter}
+        onFamilyFilter={setBakeryFamilyFilter}
+        expandedId={expandedUsageId}
+        onToggleBatch={(id) => setExpandedUsageId((current) => current === id ? '' : id)}
       />}
 
       {(message || isPending) && <p
@@ -847,6 +898,83 @@ function AlertTable({ alerts, materials }: { alerts: RawMaterialAlert[]; materia
     const recipient = typeof alert.recipientUserId === 'object' ? alert.recipientUserId?.name : ''
     return <tr key={alert.id} className="border-t border-slate-100"><td className="px-4 py-3 font-semibold">{material?.name ?? (typeof alert.materialId === 'object' ? alert.materialId.name : alert.materialId)}</td><td className="px-4 py-3">{alert.location}</td><td className="px-4 py-3 text-rose-700">{alert.currentQuantity.toLocaleString()} {material?.unit ?? ''}</td><td className="px-4 py-3">{alert.reorderThreshold.toLocaleString()} {material?.unit ?? ''}</td><td className="px-4 py-3">{recipient || 'No recipient assigned'}</td><td className="px-4 py-3">In-app notification queued</td></tr>
   })}</tbody></table></div>
+}
+
+function BakeryProductionUseView({ batches, period, onPeriod, from, onFrom, to, onTo, familyFilter, onFamilyFilter, expandedId, onToggleBatch }: {
+  batches: BakeryBatchRecord[]
+  period: UsagePeriod
+  onPeriod: (value: UsagePeriod) => void
+  from: string
+  onFrom: (value: string) => void
+  to: string
+  onTo: (value: string) => void
+  familyFilter: string
+  onFamilyFilter: (value: string) => void
+  expandedId: string
+  onToggleBatch: (id: string) => void
+}) {
+  const invalidDateRange = Boolean(from && to && from > to)
+  const materialsForBatch = (batch: BakeryBatchRecord) => [
+    ...batch.ingredients
+      .filter((line) => line.actualQuantity > 0)
+      .map((line) => ({ ...line, quantity: line.actualQuantity, sourceLabel: 'ingredient' as const })),
+    ...batch.outputs.flatMap((output) => (output.packagingMaterials ?? [])
+      .filter((line) => line.actualQuantity > 0)
+      .map((line) => ({ ...line, quantity: line.actualQuantity, sourceLabel: 'packaging' as const }))),
+  ]
+  return <div className="space-y-5 p-4">
+    <p role="note" className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-xs leading-relaxed text-emerald-900">This view reports actual ingredient and packaging quantities from completed bakery batches. Historical beverage usage remains in the separate Legacy usage history tab.</p>
+    <section className="space-y-4">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+        <div><h3 className="text-sm font-bold text-slate-900">Completed bakery batches</h3><p className="mt-1 text-xs text-slate-500">Open a batch to review actual quantities and raw-material lot allocations.</p></div>
+        <span className="text-[11px] font-medium text-slate-500">{batches.length} {batches.length === 1 ? 'batch' : 'batches'}</span>
+      </div>
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/80 p-3 sm:p-4">
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter bakery usage period">
+          {([
+            ['all', 'All time'],
+            ['today', 'Today'],
+            ['week', 'This week'],
+            ['month', 'This month'],
+          ] as Array<[UsagePeriod, string]>).map(([value, label]) => <button key={value} type="button" aria-pressed={period === value} onClick={() => onPeriod(value)} className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${period === value ? 'bg-slate-900 text-white shadow-sm' : 'border border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-100'}`}>{label}</button>)}
+        </div>
+        <div className="grid gap-3 md:grid-cols-[minmax(12rem,1fr)_repeat(2,minmax(9rem,0.65fr))]">
+          <label className="block text-[11px] font-semibold text-slate-500">Product family
+            <select aria-label="Filter bakery usage by family" value={familyFilter} onChange={(event) => onFamilyFilter(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 outline-none focus:border-primary focus:ring-2 focus:ring-ring/30">
+              <option value="">All product families</option>
+              {Array.from(new Map(batches.map((batch) => [batch.familyId, batch.familyName] as const)).entries())
+                .map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>
+          <label className="block text-[11px] font-semibold text-slate-500">From date<input aria-label="Filter bakery usage from date" type="date" value={from} onChange={(event) => onFrom(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 outline-none focus:border-primary focus:ring-2 focus:ring-ring/30" /></label>
+          <label className="block text-[11px] font-semibold text-slate-500">To date<input aria-label="Filter bakery usage to date" type="date" value={to} onChange={(event) => onTo(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 outline-none focus:border-primary focus:ring-2 focus:ring-ring/30" /></label>
+        </div>
+        {invalidDateRange && <p role="alert" className="text-xs font-medium text-rose-700">The start date must be on or before the end date.</p>}
+        {(period !== 'all' || from || to || familyFilter) && <button type="button" onClick={() => { onFrom(''); onTo(''); onFamilyFilter(''); onPeriod('all') }} className="text-left text-xs font-semibold text-primary hover:underline">Clear filters</button>}
+      </div>
+      {batches.length ? <div className="space-y-3">
+        {batches.map((batch) => {
+          const expanded = expandedId === batch.id
+          const lines = materialsForBatch(batch)
+          return <article key={batch.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+            <button type="button" aria-expanded={expanded} onClick={() => onToggleBatch(batch.id)} className="flex w-full flex-col gap-2 p-4 text-left sm:flex-row sm:items-center sm:justify-between">
+              <span><span className="block text-[11px] font-medium text-slate-500">{batch.productionDate} · {batch.reference}</span><span className="mt-0.5 block text-sm font-bold text-slate-900">{batch.familyName}</span></span>
+              <span className="text-xs text-slate-600">Recipe v{batch.recipeVersion} · {batch.location} · {lines.length} material lines</span>
+            </button>
+            {expanded && <div className="border-t border-slate-100 p-4">
+              {!lines.length ? <p className="text-xs text-slate-500">No actual ingredient or packaging quantities were recorded for this batch.</p> : <div className="space-y-2">
+                {lines.map((line, index) => <div key={`${line.materialId}-${index}`} className="flex flex-col justify-between gap-1 rounded-lg bg-slate-50 px-3 py-2 text-xs sm:flex-row sm:items-center">
+                  <span className="font-semibold text-slate-700">{line.materialName} · {line.sourceLabel}</span>
+                  <span className="font-bold tabular-nums text-slate-900">{line.quantity.toLocaleString()} {line.unit}</span>
+                  <span className="text-[10px] text-slate-500">{line.lotAllocations?.length ? line.lotAllocations.map((lot) => `${lot.internalLotCode}: ${lot.quantity.toLocaleString()} ${line.unit}`).join('; ') : 'No lot allocation recorded'}</span>
+                </div>)}
+              </div>}
+            </div>}
+          </article>
+        })}
+      </div> : <EmptyState title="No completed bakery batches found" detail="Completed batch ingredient and packaging use will appear here. Legacy beverage use is available in its separate history tab." />}
+    </section>
+  </div>
 }
 
 function ProductionUseView({ usages, period, onPeriod, from, onFrom, to, onTo, productFilter, onProductFilter, expandedId, onToggleUsage, onDownloadUsage }: {

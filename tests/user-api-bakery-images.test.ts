@@ -22,7 +22,7 @@ describe('bakery product image API', () => {
   it('uses the family-scoped signed upload and returns Cloudinary URL and public ID', async () => {
     const familyId = '507f1f77bcf86cd799439011'
     const file = new File(['image'], 'sourdough.webp', { type: 'image/webp' })
-    const publicId = `family-${familyId}-image-123`
+    const publicId = `anli/bakery/products/family-${familyId}-image-123`
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({
         uploadUrl: 'https://api.cloudinary.com/v1_1/demo/image/upload',
@@ -59,6 +59,31 @@ describe('bakery product image API', () => {
     expect(uploadForm.get('file')).toBe(file)
     expect(uploadForm.get('public_id')).toBe(`family-${familyId}-image-123`)
     expect(uploadForm.get('folder')).toBe('anli/bakery/products')
+  })
+
+  it('preserves a folder-qualified Cloudinary public ID in family updates and cleanup requests', async () => {
+    const familyId = '507f1f77bcf86cd799439011'
+    const publicId = `anli/bakery/products/family-${familyId}-image-123`
+    const image = {
+      url: 'https://res.cloudinary.com/demo/image/upload/product.webp',
+      publicId,
+      altText: 'Sourdough loaf',
+      sortOrder: 0,
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ family: { id: familyId }, imageCleanupPending: 0 }))
+      .mockResolvedValueOnce(jsonResponse({ removed: true, imageCleanupPending: 0 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await updateBakeryProductFamily(familyId, {
+      storefront: { images: [image] },
+    })
+    await deleteUnattachedBakeryProductImage(familyId, publicId)
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      storefront: { images: [image] },
+    })
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1]?.body))).toEqual({ publicId })
   })
 
   it('persists image metadata and exposes retryable Cloudinary cleanup operations', async () => {

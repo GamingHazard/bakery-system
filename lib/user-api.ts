@@ -71,6 +71,17 @@ export type UserAccount = {
   mustChangePassword: boolean;
 };
 
+export type AccountLockout = {
+  state: "none" | "temporarily_locked" | "manual_unlock_required";
+  lockedUntil?: string;
+  manualUnlockRequiredAt?: string;
+  canUnlock: boolean;
+};
+
+export type ManagedUserAccount = UserAccount & {
+  lockout: AccountLockout;
+};
+
 export type ActiveSession = {
   id: string;
   userAgent: string;
@@ -87,6 +98,16 @@ export type SessionProtectionSettings = {
   privilegedIdle: number;
   generalIdle: number;
   warningPeriod: number;
+};
+
+export type LoginProtectionSettings = {
+  lockoutEnabled: boolean;
+  maxAttempts: number;
+  attemptWindow: number;
+  lockDuration: number;
+  maxLockoutsBeforeManual: number;
+  escalationWindowHours: number;
+  notifyLockouts: boolean;
 };
 
 export type DashboardAvailability =
@@ -892,6 +913,7 @@ export type BakeryProductFamily = {
   imageCleanupPending?: number;
   storefront: {
     published: boolean;
+    firstPublishedAt?: string | null;
     slug?: string;
     description: string;
     images: Array<{ url: string; publicId?: string; altText: string; sortOrder: number }>;
@@ -901,6 +923,8 @@ export type BakeryProductFamily = {
   variants: BakeryProductVariant[];
   recipe: BakeryRecipeRecord | null;
 };
+
+export type BakeryProductFamilyUpdate = Omit<BakeryProductFamily, "variants" | "recipe">;
 
 export type BakeryBatchIngredient = {
   materialId: string;
@@ -955,7 +979,9 @@ export type BakeryBatchRecord = {
 export type FinishedStockLotRecord = {
   id: string;
   reference: string;
-  batchId: string;
+  batchId: string | null;
+  sourceType?: "production" | "manual_receipt" | "legacy_migration";
+  sourceReference?: string;
   familyId: string;
   variantId: string;
   sku: string;
@@ -970,6 +996,23 @@ export type FinishedStockLotRecord = {
   remainingQuantity: number;
   reservedQuantity: number;
   status: "active" | "depleted" | "written_off";
+};
+
+export type BakeryFinishedStockMovementRecord = {
+  id: string;
+  lotId: string;
+  lotReference: string;
+  sku: string;
+  productName: string;
+  saleUnit: string;
+  type: string;
+  direction: "in" | "out";
+  quantity: number;
+  date: string;
+  reference: string;
+  reason: string;
+  sourceType: string;
+  actor: string;
 };
 
 export type FinishedMovementRecord = {
@@ -1084,6 +1127,7 @@ export async function createBakeryProductFamily(input: {
     price: number;
     packagingMaterials?: Array<{ materialId: string; quantityPerSaleUnit: number }>;
   }>;
+  storefront?: Partial<Omit<BakeryProductFamily["storefront"], "firstPublishedAt">>;
 }) {
   return request<{ family: BakeryProductFamily }>("/production/bakery/families", {
     method: "POST",
@@ -1110,10 +1154,22 @@ export async function addBakeryVariant(
 
 export async function updateBakeryProductFamily(
   id: string,
-  input: Partial<Pick<BakeryProductFamily, "name" | "category" | "flavour" | "baseUnit" | "shelfLifeDays" | "dateLabelType" | "storageInstructions" | "active" | "storefront">>,
+  input: Partial<Pick<BakeryProductFamily, "name" | "category" | "flavour" | "baseUnit" | "shelfLifeDays" | "dateLabelType" | "storageInstructions" | "active">> & {
+    storefront?: Partial<Omit<BakeryProductFamily["storefront"], "firstPublishedAt">>;
+  },
 ) {
-  return request<{ family: BakeryProductFamily; imageCleanupPending?: number }>(
+  return request<{ family: BakeryProductFamilyUpdate; imageCleanupPending?: number }>(
     `/production/bakery/families/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+}
+
+export async function updateBakeryProductVariant(
+  id: string,
+  input: Partial<Pick<BakeryProductVariant, "name" | "price" | "active">>,
+) {
+  return request<{ variant: BakeryProductVariant }>(
+    `/production/bakery/variants/${encodeURIComponent(id)}`,
     { method: "PATCH", body: JSON.stringify(input) },
   );
 }
@@ -1172,6 +1228,44 @@ export async function completeBakeryProductionBatch(
 export async function listFinishedStockLots(options: { expiring?: boolean } = {}) {
   const query = options.expiring ? "?expiring=true" : "";
   return request<{ lots: FinishedStockLotRecord[] }>(`/production/bakery/lots${query}`);
+}
+
+export async function listFinishedStockLotMovements(options: { from?: string; to?: string; limit?: number } = {}) {
+  const params = new URLSearchParams();
+  if (options.from) params.set("from", options.from);
+  if (options.to) params.set("to", options.to);
+  if (options.limit) params.set("limit", String(options.limit));
+  const queryString = params.toString();
+  const query = queryString ? `?${queryString}` : "";
+  return request<{ movements: BakeryFinishedStockMovementRecord[] }>(`/production/bakery/lots/movements${query}`);
+}
+
+export async function receiveBakeryFinishedStockLot(input: {
+  familyId: string;
+  variantId: string;
+  quantity: number;
+  productionDate: string;
+  receiptDate: string;
+  expiryDate: string;
+  location: string;
+  reference: string;
+  reason: string;
+  idempotencyKey: string;
+}) {
+  return request<{ lot: FinishedStockLotRecord; movement: BakeryFinishedStockMovementRecord; replayed: boolean }>(
+    "/production/bakery/lots/receipts",
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export async function adjustBakeryFinishedStockLot(
+  id: string,
+  input: { direction: "in" | "out"; quantity: number; date: string; reason: string; idempotencyKey: string },
+) {
+  return request<{ lot: FinishedStockLotRecord; movement: BakeryFinishedStockMovementRecord; replayed: boolean }>(
+    `/production/bakery/lots/${encodeURIComponent(id)}/adjustments`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
 }
 
 export async function writeOffFinishedStockLot(
@@ -4258,6 +4352,24 @@ export function updateSessionProtectionSettings(
   );
 }
 
+export function getLoginProtectionSettings() {
+  return request<{ loginProtection: LoginProtectionSettings }>(
+    "/security-settings",
+  );
+}
+
+export function updateLoginProtectionSettings(
+  settings: LoginProtectionSettings,
+) {
+  return request<{ loginProtection: LoginProtectionSettings }>(
+    "/security-settings/login-protection",
+    {
+      method: "PATCH",
+      body: JSON.stringify(settings),
+    },
+  );
+}
+
 export type SalesBonusSettings = {
   enabled: boolean;
   standard: {
@@ -4310,7 +4422,7 @@ export async function listAuditEventTypes() {
 }
 
 export async function listUsers() {
-  const result = await request<{ users: UserAccount[] }>("/users");
+  const result = await request<{ users: ManagedUserAccount[] }>("/users");
   return result.users;
 }
 
@@ -4346,6 +4458,16 @@ export function updateUserStatus(
     {
       method: "PATCH",
       body: JSON.stringify({ status, suspensionReason }),
+    },
+  );
+}
+
+export function unlockUserAccount(id: string, reason: string) {
+  return request<{ user: ManagedUserAccount }>(
+    `/users/${encodeURIComponent(id)}/unlock`,
+    {
+      method: "POST",
+      body: JSON.stringify({ reason }),
     },
   );
 }

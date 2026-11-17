@@ -60,6 +60,8 @@ function sectionForResource(type: string) {
       return 'Raw Material Management'
     case 'finished_stock_lot':
       return 'Production Management'
+    case 'user':
+      return 'User Management'
     default:
       return null
   }

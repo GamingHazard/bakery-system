@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import * as Icons from 'lucide-react'
 import AuditLogPanel from '@/components/audit-log'
-import { ApiError, USER_ROLES, createUser, listUsers, resetUserPassword, updateUser, updateUserStatus, type AccountStatus, type UserAccount, type UserRole } from '@/lib/user-api'
+import { ApiError, USER_ROLES, createUser, listUsers, resetUserPassword, unlockUserAccount, updateUser, updateUserStatus, type AccountStatus, type ManagedUserAccount, type UserAccount, type UserRole } from '@/lib/user-api'
 import { canManageAccount, creatableRolesForAccountManager } from '@/lib/authorization'
 
 type ActivityEntry = { id: string; message: string; time: string }
@@ -25,7 +25,7 @@ function formatTimestamp(value?: string) {
 }
 
 export default function UserManagement({ currentUser }: { currentUser: UserAccount }) {
-  const [accounts, setAccounts] = useState<UserAccount[]>([])
+  const [accounts, setAccounts] = useState<ManagedUserAccount[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [activity, setActivity] = useState<ActivityEntry[]>([])
@@ -36,11 +36,13 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
   const [editing, setEditing] = useState<UserAccount | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [pendingStatus, setPendingStatus] = useState<PendingStatus | null>(null)
+  const [pendingUnlock, setPendingUnlock] = useState<ManagedUserAccount | null>(null)
   const [pendingPasswordReset, setPendingPasswordReset] = useState<UserAccount | null>(null)
   const [passwordReset, setPasswordReset] = useState<PasswordReset | null>(null)
   const [auditTarget, setAuditTarget] = useState<UserAccount | null>(null)
   const [copyMessage, setCopyMessage] = useState('')
   const [suspensionReason, setSuspensionReason] = useState('')
+  const [unlockReason, setUnlockReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
 
@@ -73,7 +75,7 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
   const assignedUniqueRoles = new Set(accounts.filter((account) => account.status !== 'Deactivated').flatMap((account) => account.roles).filter((role) => SINGLE_USER_ROLES.includes(role))).size
   const vacantRoles = SINGLE_USER_ROLES.length - assignedUniqueRoles
   const creatableRoles = creatableRolesForAccountManager(currentUser.roles)
-  const filteredAccounts = useMemo(() => accounts.filter((account) => canManageAccount(currentUser, account)).filter((account) => {
+  const filteredAccounts = useMemo(() => accounts.filter((account) => canManageAccount(currentUser, account) || account.lockout.canUnlock).filter((account) => {
     const searchable = `${account.name} ${account.email} ${account.roles.join(' ')}`.toLowerCase()
     return searchable.includes(search.trim().toLowerCase())
       && (statusFilter === 'All statuses' || account.status === statusFilter)
@@ -126,8 +128,8 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
         ? await updateUser(editing.id, { name, email, roles: selectedRoles })
         : await createUser({ name, email, password, roles: selectedRoles })
       setAccounts((current) => editing
-        ? current.map((account) => account.id === user.id ? user : account)
-        : [user, ...current])
+        ? current.map((account) => account.id === user.id ? { ...account, ...user } : account)
+        : [{ ...user, lockout: { state: 'none', canUnlock: false } }, ...current])
       addActivity(`${editing ? 'Updated' : 'Created'} account for ${user.name}`)
       setShowForm(false)
       setMessage(`${editing ? 'Account updated' : 'Account created'} successfully.`)
@@ -155,13 +157,32 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
     setSaving(true)
     try {
       const { user } = await updateUserStatus(account.id, status, suspensionReason)
-      setAccounts((current) => current.map((candidate) => candidate.id === user.id ? user : candidate))
+      setAccounts((current) => current.map((candidate) => candidate.id === user.id ? { ...candidate, ...user } : candidate))
       addActivity(`${status === 'Active' ? 'Reactivated' : status === 'Suspended' ? 'Suspended' : 'Deactivated'} ${user.name}${status === 'Suspended' ? ` · ${suspensionReason.trim()}` : ''}`)
       setPendingStatus(null)
       setMessage(`${user.name} is now ${status.toLowerCase()}.`)
     } catch (error) {
       setPendingStatus(null)
       setMessage(error instanceof ApiError ? error.message : 'Could not update this account status.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const confirmUnlock = async () => {
+    if (!pendingUnlock || !unlockReason.trim()) return
+    const account = pendingUnlock
+    setSaving(true)
+    setMessage('')
+    try {
+      const { user } = await unlockUserAccount(account.id, unlockReason.trim())
+      setAccounts((current) => current.map((candidate) => candidate.id === user.id ? user : candidate))
+      addActivity(`Unlocked ${user.name} · ${unlockReason.trim()}`)
+      setPendingUnlock(null)
+      setUnlockReason('')
+      setMessage(`${user.name} can sign in again. Account status was not changed.`)
+    } catch (error) {
+      setMessage(error instanceof ApiError ? error.message : 'Could not unlock this account.')
     } finally {
       setSaving(false)
     }
@@ -207,9 +228,10 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
 
     <div role="status" className="mb-5 flex items-start gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-xs leading-5 text-sky-900"><Icons.ShieldCheck className="mt-0.5 size-4 shrink-0" /><p>Accounts are stored on the server. New accounts must change their initial password the first time they sign in.</p></div>
 
-    <section aria-label="Account summary" className="mb-5 grid gap-3 sm:grid-cols-3">
+    <section aria-label="Account summary" className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <SummaryMetric label="Active accounts" value={activeAccounts.length} detail="Enabled accounts" icon="UsersRound" tone="green" />
       <SummaryMetric label="Suspended" value={suspendedAccounts.length} detail="Temporarily restricted" icon="UserRoundX" tone="amber" />
+      <SummaryMetric label="Sign-in locked" value={accounts.filter((account) => account.lockout.state !== 'none').length} detail="Temporary and manual lockouts" icon="ShieldAlert" tone="blue" />
       <SummaryMetric label="Vacant unique roles" value={vacantRoles} detail="HR and Inventory Manager are single-user roles" icon="ShieldAlert" tone="blue" />
     </section>
 
@@ -227,13 +249,29 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
           {(search || roleFilter !== 'All roles' || statusFilter !== 'All statuses') && <button type="button" onClick={clearFilters} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50">Clear</button>}
         </div>
       </div>
-      <div className="overflow-x-auto"><table className="w-full min-w-190 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['User', 'Assigned roles', 'Last active', 'Status', ''].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr></thead><tbody>
-        {loading && <tr><td colSpan={5} className="px-5 py-12 text-center text-xs text-slate-500">Loading accounts…</td></tr>}
-        {loadError && <tr><td colSpan={5} className="px-5 py-8 text-center"><p role="alert" className="text-xs text-rose-700">{loadError}</p><button type="button" onClick={refreshUsers} className="mt-2 text-xs font-semibold text-primary hover:underline">Try again</button></td></tr>}
-        {filteredAccounts.map((account) => <tr key={account.id} className="border-t border-slate-100 text-slate-600 hover:bg-slate-50/70"><td className="px-4 py-3"><div className="flex items-center gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-xs font-bold text-primary">{account.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span><span className="min-w-0"><span className="block truncate font-semibold text-slate-800">{account.name}</span><span className="mt-0.5 block truncate text-[10px] text-slate-400">{account.email}</span></span></div></td><td className="px-4 py-3"><div className="flex max-w-md flex-wrap gap-1.5">{account.roles.map((role) => <span key={role} className={`rounded-md px-2 py-1 text-[10px] font-semibold ${role === 'Super Admin' ? 'bg-violet-50 text-violet-800' : role === 'Admin' ? 'bg-slate-100 text-slate-700' : 'bg-sky-50 text-sky-800'}`}>{role}</span>)}</div></td><td className="whitespace-nowrap px-4 py-3 text-[11px] text-slate-500">{formatTimestamp(account.lastActive)}</td><td className="px-4 py-3"><span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold ${statusTone[account.status]}`}><span className="size-1.5 rounded-full bg-current" />{account.status}</span>{account.suspensionReason && <span className="mt-1 block max-w-36 truncate text-[10px] text-slate-400" title={account.suspensionReason}>{account.suspensionReason}</span>}</td><td className="px-4 py-3"><div className="flex justify-end gap-1">{currentUser.roles.includes('Super Admin') && <button type="button" onClick={() => setAuditTarget(account)} aria-label={`View audit history for ${account.name}`} title="Audit history" className="grid size-8 place-items-center rounded-md text-primary hover:bg-secondary"><Icons.ScrollText className="size-4" /></button>}<button type="button" onClick={() => setPendingPasswordReset(account)} aria-label={`Reset password for ${account.name}`} title="Reset password" className="grid size-8 place-items-center rounded-md text-violet-700 hover:bg-violet-50"><Icons.KeyRound className="size-4" /></button><button type="button" onClick={() => openEdit(account)} aria-label={`Edit ${account.name}`} title="Edit account" className="grid size-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"><Icons.PencilLine className="size-4" /></button>{account.status === 'Active' ? <button type="button" onClick={() => requestStatus(account, 'Suspended')} aria-label={`Suspend ${account.name}`} title="Suspend account" className="grid size-8 place-items-center rounded-md text-amber-700 hover:bg-amber-50"><Icons.Pause className="size-4" /></button> : account.status === 'Suspended' ? <button type="button" onClick={() => requestStatus(account, 'Active')} aria-label={`Reactivate ${account.name}`} title="Reactivate account" className="grid size-8 place-items-center rounded-md text-emerald-700 hover:bg-emerald-50"><Icons.CircleCheck className="size-4" /></button> : <button type="button" onClick={() => requestStatus(account, 'Active')} aria-label={`Restore ${account.name}`} title="Restore account" className="grid size-8 place-items-center rounded-md text-emerald-700 hover:bg-emerald-50"><Icons.RotateCcw className="size-4" /></button>}{account.status !== 'Deactivated' && <button type="button" onClick={() => requestStatus(account, 'Deactivated')} aria-label={`Deactivate ${account.name}`} title="Deactivate account" className="grid size-8 place-items-center rounded-md text-rose-700 hover:bg-rose-50"><Icons.UserRoundMinus className="size-4" /></button>}</div></td></tr>)}
-        {!loading && !loadError && !filteredAccounts.length && <tr><td colSpan={5} className="px-5 py-14 text-center"><Icons.UsersRound className="mx-auto size-5 text-slate-300" /><p className="mt-3 text-xs font-semibold text-slate-700">No accounts match these filters</p><button type="button" onClick={clearFilters} className="mt-1 text-xs font-semibold text-primary hover:underline">Clear filters</button></td></tr>}
+      <div className="overflow-x-auto"><table className="w-full min-w-220 text-left text-xs"><thead className="bg-slate-50 text-[10px] font-semibold uppercase text-slate-400"><tr>{['User', 'Assigned roles', 'Last active', 'Status', 'Sign-in protection', ''].map((heading) => <th key={heading} className="px-4 py-3">{heading}</th>)}</tr></thead><tbody>
+        {loading && <tr><td colSpan={6} className="px-5 py-12 text-center text-xs text-slate-500">Loading accounts…</td></tr>}
+        {loadError && <tr><td colSpan={6} className="px-5 py-8 text-center"><p role="alert" className="text-xs text-rose-700">{loadError}</p><button type="button" onClick={refreshUsers} className="mt-2 text-xs font-semibold text-primary hover:underline">Try again</button></td></tr>}
+        {filteredAccounts.map((account) => <tr key={account.id} className="border-t border-slate-100 text-slate-600 hover:bg-slate-50/70">
+          <td className="px-4 py-3"><div className="flex items-center gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-secondary text-xs font-bold text-primary">{account.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase()}</span><span className="min-w-0"><span className="block truncate font-semibold text-slate-800">{account.name}</span><span className="mt-0.5 block truncate text-[10px] text-slate-400">{account.email}</span></span></div></td>
+          <td className="px-4 py-3"><div className="flex max-w-md flex-wrap gap-1.5">{account.roles.map((role) => <span key={role} className={`rounded-md px-2 py-1 text-[10px] font-semibold ${role === 'Super Admin' ? 'bg-violet-50 text-violet-800' : role === 'Admin' ? 'bg-slate-100 text-slate-700' : 'bg-sky-50 text-sky-800'}`}>{role}</span>)}</div></td>
+          <td className="whitespace-nowrap px-4 py-3 text-[11px] text-slate-500">{formatTimestamp(account.lastActive)}</td>
+          <td className="px-4 py-3"><span className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold ${statusTone[account.status]}`}><span className="size-1.5 rounded-full bg-current" />{account.status}</span>{account.suspensionReason && <span className="mt-1 block max-w-36 truncate text-[10px] text-slate-400" title={account.suspensionReason}>{account.suspensionReason}</span>}</td>
+          <td className="px-4 py-3 text-[10px]">{account.lockout.state === 'manual_unlock_required' ? <span className="font-semibold text-rose-700">Manual unlock required<span className="mt-1 block font-normal text-slate-400">{formatTimestamp(account.lockout.manualUnlockRequiredAt)}</span></span> : account.lockout.state === 'temporarily_locked' ? <span className="font-semibold text-amber-700">Temporarily locked<span className="mt-1 block font-normal text-slate-400">Until {formatTimestamp(account.lockout.lockedUntil)}</span></span> : <span className="text-slate-400">Not locked</span>}</td>
+          <td className="px-4 py-3"><div className="flex justify-end gap-1">
+            {currentUser.roles.includes('Super Admin') && <button type="button" onClick={() => setAuditTarget(account)} aria-label={`View audit history for ${account.name}`} title="Audit history" className="grid size-8 place-items-center rounded-md text-primary hover:bg-secondary"><Icons.ScrollText className="size-4" /></button>}
+            {canManageAccount(currentUser, account) && <>
+              <button type="button" onClick={() => setPendingPasswordReset(account)} aria-label={`Reset password for ${account.name}`} title="Reset password" className="grid size-8 place-items-center rounded-md text-violet-700 hover:bg-violet-50"><Icons.KeyRound className="size-4" /></button>
+              <button type="button" onClick={() => openEdit(account)} aria-label={`Edit ${account.name}`} title="Edit account" className="grid size-8 place-items-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"><Icons.PencilLine className="size-4" /></button>
+              {account.status === 'Active' ? <button type="button" onClick={() => requestStatus(account, 'Suspended')} aria-label={`Suspend ${account.name}`} title="Suspend account" className="grid size-8 place-items-center rounded-md text-amber-700 hover:bg-amber-50"><Icons.Pause className="size-4" /></button> : account.status === 'Suspended' ? <button type="button" onClick={() => requestStatus(account, 'Active')} aria-label={`Reactivate ${account.name}`} title="Reactivate account" className="grid size-8 place-items-center rounded-md text-emerald-700 hover:bg-emerald-50"><Icons.CircleCheck className="size-4" /></button> : <button type="button" onClick={() => requestStatus(account, 'Active')} aria-label={`Restore ${account.name}`} title="Restore account" className="grid size-8 place-items-center rounded-md text-emerald-700 hover:bg-emerald-50"><Icons.RotateCcw className="size-4" /></button>}
+              {account.status !== 'Deactivated' && <button type="button" onClick={() => requestStatus(account, 'Deactivated')} aria-label={`Deactivate ${account.name}`} title="Deactivate account" className="grid size-8 place-items-center rounded-md text-rose-700 hover:bg-rose-50"><Icons.UserRoundMinus className="size-4" /></button>}
+            </>}
+            {account.lockout.canUnlock && <button type="button" onClick={() => { setUnlockReason(''); setPendingUnlock(account) }} aria-label={`Unlock ${account.name}`} title="Unlock account" className="grid size-8 place-items-center rounded-md text-emerald-700 hover:bg-emerald-50"><Icons.KeyRound className="size-4" /></button>}
+          </div></td>
+        </tr>)}
+        {!loading && !loadError && !filteredAccounts.length && <tr><td colSpan={6} className="px-5 py-14 text-center"><Icons.UsersRound className="mx-auto size-5 text-slate-300" /><p className="mt-3 text-xs font-semibold text-slate-700">No accounts match these filters</p><button type="button" onClick={clearFilters} className="mt-1 text-xs font-semibold text-primary hover:underline">Clear filters</button></td></tr>}
       </tbody></table></div>
-      <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Role ownership rules are validated by the server.</footer>
+      <footer className="border-t border-slate-100 px-4 py-3 text-[10px] text-slate-400">Lockout and role ownership rules are validated by the server.</footer>
     </section> : <section aria-label="Role coverage" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <header className="border-b border-slate-100 px-5 py-4"><h3 className="text-sm font-bold text-slate-900">Role coverage</h3><p className="mt-1 text-xs text-slate-500">Human Resource and Inventory Manager can each have only one assigned user.</p></header>
       <div className="divide-y divide-slate-100">{roles.map((role) => { const owners = roleAssignees(role); return <div key={role} className="flex flex-col gap-2 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-2"><Icons.Shield className="size-4 text-slate-400" /><span className="text-xs font-semibold text-slate-800">{role}</span>{SINGLE_USER_ROLES.includes(role) && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-medium text-slate-500">Single owner</span>}</div><div className="flex flex-wrap gap-2">{owners.length ? owners.map((owner) => <span key={owner.id} className="inline-flex items-center gap-1.5 rounded-md bg-slate-50 px-2.5 py-1.5 text-[11px] font-medium text-slate-700"><span className="size-1.5 rounded-full bg-emerald-500" />{owner.name}</span>) : <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800"><Icons.CircleAlert className="size-3.5" />Unassigned</span>}</div></div> })}</div>
@@ -243,6 +281,11 @@ export default function UserManagement({ currentUser }: { currentUser: UserAccou
 
     {showForm && <UserForm account={editing} accounts={accounts} creatableRoles={creatableRoles} message={message} saving={saving} onClose={() => setShowForm(false)} onSave={saveAccount} />}
     {pendingStatus && <StatusDialog pending={pendingStatus} reason={suspensionReason} setReason={setSuspensionReason} saving={saving} onClose={() => setPendingStatus(null)} onConfirm={confirmStatus} />}
+    {pendingUnlock && <Modal title="Unlock account" subtitle={`${pendingUnlock.name} · ${pendingUnlock.email}`} onClose={() => { if (!saving) setPendingUnlock(null) }}><div className="p-5">
+      <p className="text-xs leading-5 text-slate-600">This clears the manual sign-in lock and its escalation history. The account’s Active, Suspended, or Deactivated status will not change. Enter a reason; the unlock is recorded in the audit log.</p>
+      <label className="mt-4 block text-xs font-semibold text-slate-600">Unlock reason<textarea required maxLength={500} value={unlockReason} onChange={(event) => setUnlockReason(event.target.value)} className={`${fieldClass} min-h-24 resize-y`} placeholder="Explain why this account is being unlocked" /></label>
+      <div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={saving} onClick={() => setPendingUnlock(null)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">Cancel</button><button type="button" disabled={saving || !unlockReason.trim()} onClick={() => void confirmUnlock()} className="rounded-lg bg-emerald-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">{saving ? 'Unlocking…' : 'Unlock account'}</button></div>
+    </div></Modal>}
     {pendingPasswordReset && <Modal title="Reset user password" subtitle={`${pendingPasswordReset.name} · ${pendingPasswordReset.email}`} onClose={() => { if (!saving) setPendingPasswordReset(null) }}><div className="p-5"><p className="text-xs leading-5 text-slate-600">This will replace the current password, sign the user out of existing sessions, and require a password change at next sign-in. The generated six-character temporary password expires in 24 hours.</p><div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={saving} onClick={() => setPendingPasswordReset(null)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 disabled:opacity-50">Cancel</button><button type="button" disabled={saving} onClick={confirmPasswordReset} className="rounded-lg bg-violet-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-violet-800 disabled:opacity-50">{saving ? 'Resetting…' : 'Generate temporary password'}</button></div></div></Modal>}
     {passwordReset && <Modal title="Temporary password" subtitle={`${passwordReset.account.name} · ${passwordReset.account.email}`} onClose={() => { setPasswordReset(null); setCopyMessage('') }}><div className="p-5"><p className="text-xs leading-5 text-slate-600">Share this six-character temporary password with the user using a secure channel. It is shown only now, expires {formatTimestamp(passwordReset.expiresAt)}, and must be changed at their next sign-in.</p><code className="mt-4 block select-all break-all rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-sm text-slate-900">{passwordReset.temporaryPassword}</code>{copyMessage && <p role="status" className="mt-2 text-xs text-slate-600">{copyMessage}</p>}<div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={copyTemporaryPassword} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Icons.Copy className="size-3.5" />Copy password</button><button type="button" onClick={() => { setPasswordReset(null); setCopyMessage('') }} className="rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90">Done</button></div></div></Modal>}
     {auditTarget && <Modal title="Account audit history" subtitle={`${auditTarget.name} · ${auditTarget.email}`} onClose={() => setAuditTarget(null)}><div className="p-4"><AuditLogPanel currentUser={currentUser} targetUserId={auditTarget.id} /></div></Modal>}

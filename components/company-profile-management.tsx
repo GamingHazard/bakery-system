@@ -14,7 +14,8 @@ type Props = {
 const fieldClass = 'mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-ring/20'
 const labelClass = 'block text-xs font-semibold text-slate-600'
 
-type CompanyTextField = Exclude<keyof CompanyProfile, 'logo'>
+type CompanyTextField = Exclude<keyof CompanyProfile, 'logo' | 'publicContacts'>
+type PublicContactField = keyof CompanyProfile['publicContacts']
 
 export default function CompanyProfileManagement({ profile, canEdit, onSave }: Props) {
   const [values, setValues] = useState<CompanyProfile>(profile)
@@ -41,6 +42,15 @@ export default function CompanyProfileManagement({ profile, canEdit, onSave }: P
 
   const update = (key: CompanyTextField, value: string) => {
     setValues((current) => ({ ...current, [key]: value }))
+    setSaveMessage('')
+    setErrorMessage('')
+  }
+
+  const updatePublicContact = (key: PublicContactField, enabled: boolean) => {
+    setValues((current) => ({
+      ...current,
+      publicContacts: { ...current.publicContacts, [key]: enabled },
+    }))
     setSaveMessage('')
     setErrorMessage('')
   }
@@ -78,6 +88,7 @@ export default function CompanyProfileManagement({ profile, canEdit, onSave }: P
       tin: values.tin.trim(),
       registrationNumber: values.registrationNumber.trim(),
       registrationAuthority: values.registrationAuthority.trim(),
+      publicContacts: { ...values.publicContacts },
     }
     let profileTextSaved = false
     try {
@@ -220,6 +231,28 @@ export default function CompanyProfileManagement({ profile, canEdit, onSave }: P
               {field('region', 'Region / state', { placeholder: 'Region or state' })}
               {field('postalCode', 'Postal code', { placeholder: 'Optional' })}
               {field('country', 'Country', { placeholder: 'Country' })}
+            </div>
+          </section>
+
+          <section aria-labelledby="company-public-contact-title" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-5 py-4"><h3 id="company-public-contact-title" className="text-sm font-bold text-slate-900">Website contact publication</h3><p className="mt-1 text-xs text-slate-500">Each option is off by default. Only selected, non-empty values are included in the public bakery website settings.</p></div>
+            <div className="grid gap-3 p-5 sm:grid-cols-3">
+              {([
+                ['email', 'Publish company email'],
+                ['phone', 'Publish company phone'],
+                ['address', 'Publish company address'],
+              ] as const).map(([key, label]) => (
+                <label key={key} className="flex items-start gap-2.5 rounded-lg border border-slate-200 p-3 text-xs font-medium text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={values.publicContacts[key]}
+                    disabled={!canEdit || saving}
+                    onChange={(event) => updatePublicContact(key, event.target.checked)}
+                    className="mt-0.5 size-4 rounded border-slate-300 text-primary focus:ring-ring/30"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
             </div>
           </section>
 

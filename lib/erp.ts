@@ -846,6 +846,7 @@ export type CompanyProfile = {
   registrationNumber: string;
   registrationAuthority: string;
   logo: { url: string; publicId: string };
+  publicContacts: { email: boolean; phone: boolean; address: boolean };
 };
 export type ErpState = {
   sales: Sale[];
@@ -888,6 +889,7 @@ export const emptyCompanyProfile: CompanyProfile = {
   registrationNumber: "",
   registrationAuthority: "",
   logo: { url: "", publicId: "" },
+  publicContacts: { email: false, phone: false, address: false },
 };
 
 const normalizeCompanyProfile = (value: unknown): CompanyProfile => {
@@ -899,8 +901,12 @@ const normalizeCompanyProfile = (value: unknown): CompanyProfile => {
     profile.logo && typeof profile.logo === "object"
       ? (profile.logo as Record<string, unknown>)
       : {};
+  const publicContacts =
+    profile.publicContacts && typeof profile.publicContacts === "object"
+      ? (profile.publicContacts as Record<string, unknown>)
+      : {};
   const textFields = Object.keys(emptyCompanyProfile).filter(
-    (key) => key !== "logo",
+    (key) => key !== "logo" && key !== "publicContacts",
   );
   return {
     ...Object.fromEntries(
@@ -912,6 +918,20 @@ const normalizeCompanyProfile = (value: unknown): CompanyProfile => {
     logo: {
       url: typeof logo.url === "string" ? logo.url : "",
       publicId: typeof logo.publicId === "string" ? logo.publicId : "",
+    },
+    publicContacts: {
+      email:
+        typeof publicContacts.email === "boolean"
+          ? publicContacts.email
+          : false,
+      phone:
+        typeof publicContacts.phone === "boolean"
+          ? publicContacts.phone
+          : false,
+      address:
+        typeof publicContacts.address === "boolean"
+          ? publicContacts.address
+          : false,
     },
   } as CompanyProfile;
 };

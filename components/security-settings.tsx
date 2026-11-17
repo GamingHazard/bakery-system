@@ -5,12 +5,15 @@ import * as Icons from 'lucide-react'
 import AuditLogPanel from '@/components/audit-log'
 import {
   ApiError,
+  getLoginProtectionSettings,
   getSessionProtectionSettings,
   listActiveSessions,
   listUsers,
   revokeActiveSession,
+  updateLoginProtectionSettings,
   updateSessionProtectionSettings,
   type ActiveSession,
+  type LoginProtectionSettings,
   type SessionProtectionSettings,
   type UserAccount,
 } from '@/lib/user-api'
@@ -163,12 +166,57 @@ function SessionDevicePanel({
 export default function SecuritySettings({ currentUser, onCurrentSessionRevoked }: { currentUser: UserAccount; onCurrentSessionRevoked: () => void }) {
   const [section, setSection] = useState<Section>('Protection')
   const [selectedRole, setSelectedRole] = useState<Role>('Admin')
-  const [lockoutEnabled, setLockoutEnabled] = useState(true)
-  const [maxAttempts, setMaxAttempts] = useState(5)
-  const [attemptWindow, setAttemptWindow] = useState(15)
-  const [lockDuration, setLockDuration] = useState(15)
-  const [notifyLockouts, setNotifyLockouts] = useState(true)
+  const isSuperAdmin = currentUser.roles.includes('Super Admin')
+  const [loginProtection, setLoginProtection] = useState<LoginProtectionSettings>({
+    lockoutEnabled: true,
+    maxAttempts: 5,
+    attemptWindow: 15,
+    lockDuration: 15,
+    maxLockoutsBeforeManual: 5,
+    escalationWindowHours: 24,
+    notifyLockouts: true,
+  })
+  const [loginProtectionLoading, setLoginProtectionLoading] = useState(isSuperAdmin)
+  const [loginProtectionLoaded, setLoginProtectionLoaded] = useState(false)
+  const [loginProtectionSaving, setLoginProtectionSaving] = useState(false)
+  const [loginProtectionError, setLoginProtectionError] = useState('')
+  const [loginProtectionNotice, setLoginProtectionNotice] = useState('')
   const [permissions, setPermissions] = useState(initialPermissions)
+
+  useEffect(() => {
+    let mounted = true
+    if (isSuperAdmin) {
+      getLoginProtectionSettings()
+        .then((result) => {
+          if (mounted) {
+            setLoginProtection(result.loginProtection)
+            setLoginProtectionLoaded(true)
+          }
+        })
+        .catch((cause: unknown) => {
+          if (mounted) setLoginProtectionError(cause instanceof ApiError ? cause.message : 'Could not load sign-in protection settings.')
+        })
+        .finally(() => {
+          if (mounted) setLoginProtectionLoading(false)
+        })
+    }
+    return () => { mounted = false }
+  }, [isSuperAdmin])
+
+  const saveLoginProtection = async () => {
+    setLoginProtectionSaving(true)
+    setLoginProtectionError('')
+    setLoginProtectionNotice('')
+    try {
+      const result = await updateLoginProtectionSettings(loginProtection)
+      setLoginProtection(result.loginProtection)
+      setLoginProtectionNotice('Failed sign-in protection settings saved.')
+    } catch (cause) {
+      setLoginProtectionError(cause instanceof ApiError ? cause.message : 'Could not save sign-in protection settings.')
+    } finally {
+      setLoginProtectionSaving(false)
+    }
+  }
 
   const updatePermission = (area: string, capability: Capability, enabled: boolean) => {
     setPermissions((current) => ({ ...current, [selectedRole]: { ...current[selectedRole], [area]: { ...current[selectedRole][area], [capability]: enabled } } }))
@@ -177,12 +225,28 @@ export default function SecuritySettings({ currentUser, onCurrentSessionRevoked 
   return <div className="animate-in fade-in duration-300">
     <header className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Settings</div><h2 className="text-2xl font-bold tracking-tight text-slate-900">Security settings</h2><p className="mt-1 max-w-2xl text-sm text-slate-500">Configure sign-in protection, role permissions, account recovery, and device backups.</p></div><span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[10px] font-semibold text-emerald-800"><span className="size-1.5 rounded-full bg-emerald-500" />Session protection connected</span></header>
 
-    <div role="status" className="mb-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><Icons.TriangleAlert className="mt-0.5 size-4 shrink-0" /><p><strong>Some controls are previews only.</strong> Session idle expiry, device revocation, and account security audit records are server-backed. Failed-sign-in policy, MFA, permissions, recovery notifications, and backups are not yet enforced or persisted.</p></div>
+    <div role="status" className="mb-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950"><Icons.TriangleAlert className="mt-0.5 size-4 shrink-0" /><p><strong>Some controls are previews only.</strong> Session idle expiry, device revocation, failed-sign-in lockout, and security audit records are server-backed. MFA, permissions, account-recovery notifications, and backups are not yet enforced or persisted.</p></div>
 
     <div role="tablist" aria-label="Security settings sections" className="mb-5 flex gap-1 overflow-x-auto border-b border-slate-200">{(['Protection', 'Permissions', 'Backups & recovery', 'Audit'] as const).map((item) => <button key={item} type="button" role="tab" aria-selected={section === item} onClick={() => setSection(item)} className={`shrink-0 border-b-2 px-3 py-3 text-xs font-semibold ${section === item ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{item}</button>)}</div>
 
     {section === 'Protection' && <div className="grid gap-5 xl:grid-cols-2">
-      <Card title="Failed sign-in protection" detail="Limit repeated password guesses and make recovery auditable." icon="ShieldAlert"><div className="space-y-5"><Toggle checked={lockoutEnabled} onChange={setLockoutEnabled} title="Enable automatic lockout" description="Lock an account after repeated failed sign-in attempts." /><div className={`grid gap-3 sm:grid-cols-3 ${lockoutEnabled ? '' : 'pointer-events-none opacity-45'}`}><NumberField label="Failed attempts" value={maxAttempts} min={3} max={20} suffix="attempts" onChange={setMaxAttempts} /><NumberField label="Attempt window" value={attemptWindow} min={1} max={120} suffix="minutes" onChange={setAttemptWindow} /><NumberField label="Lock duration" value={lockDuration} min={1} max={1440} suffix="minutes" onChange={setLockDuration} /></div><p className="rounded-md bg-slate-50 px-3 py-2.5 text-[10px] leading-4 text-slate-600">Preview defaults: {maxAttempts} attempts in {attemptWindow} minutes, then a {lockDuration}-minute lock. Add progressive delays, recovery, and rate limits in the authentication service.</p><Toggle checked={notifyLockouts} onChange={setNotifyLockouts} title="Notify Super Admins of lockouts" description="Notification delivery and event history require backend integration." /></div></Card>
+      <Card title="Failed sign-in protection" detail="Apply per-account limits, escalation, and audited manual recovery." icon="ShieldAlert"><div className="space-y-5">
+        {isSuperAdmin ? <>
+          <Toggle checked={loginProtection.lockoutEnabled} onChange={(value) => setLoginProtection((current) => ({ ...current, lockoutEnabled: value }))} title="Enable automatic lockout" description="Temporarily lock an account after repeated failed sign-in attempts." />
+          <div className={`grid gap-3 sm:grid-cols-2 ${loginProtection.lockoutEnabled ? '' : 'pointer-events-none opacity-45'}`}>
+            <NumberField label="Failed attempts" value={loginProtection.maxAttempts} min={3} max={20} suffix="attempts" onChange={(value) => setLoginProtection((current) => ({ ...current, maxAttempts: value }))} />
+            <NumberField label="Attempt window" value={loginProtection.attemptWindow} min={1} max={120} suffix="minutes" onChange={(value) => setLoginProtection((current) => ({ ...current, attemptWindow: value }))} />
+            <NumberField label="Temporary lock duration" value={loginProtection.lockDuration} min={1} max={1440} suffix="minutes" onChange={(value) => setLoginProtection((current) => ({ ...current, lockDuration: value }))} />
+            <NumberField label="Temporary lockouts before manual unlock" value={loginProtection.maxLockoutsBeforeManual} min={2} max={10} suffix="lockouts" onChange={(value) => setLoginProtection((current) => ({ ...current, maxLockoutsBeforeManual: value }))} />
+            <NumberField label="Escalation window" value={loginProtection.escalationWindowHours} min={1} max={168} suffix="hours" onChange={(value) => setLoginProtection((current) => ({ ...current, escalationWindowHours: value }))} />
+          </div>
+          <Toggle checked={loginProtection.notifyLockouts} onChange={(value) => setLoginProtection((current) => ({ ...current, notifyLockouts: value }))} title="Notify responsible account managers" description="Send in-app alerts on each temporary lockout and when manual unlock is required." />
+          <p className="rounded-md bg-slate-50 px-3 py-2.5 text-[10px] leading-4 text-slate-600">After {loginProtection.maxLockoutsBeforeManual} temporary lockouts within {loginProtection.escalationWindowHours} hours, the account remains locked until an authorized manager unlocks it. Existing suspension or deactivation status is not changed.</p>
+          {loginProtectionError && <p role="alert" className="rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700">{loginProtectionError}</p>}
+          {loginProtectionNotice && <p role="status" className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700">{loginProtectionNotice}</p>}
+          <button type="button" disabled={loginProtectionLoading || !loginProtectionLoaded || loginProtectionSaving} onClick={() => void saveLoginProtection()} className="rounded-lg bg-primary px-3.5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">{loginProtectionLoading ? 'Loading…' : loginProtectionSaving ? 'Saving…' : 'Save sign-in protection'}</button>
+        </> : <p className="rounded-md bg-slate-50 px-3 py-2.5 text-xs leading-5 text-slate-600">Automatic lockout is enforced by the server. Contact a Super Admin to change the policy.</p>}
+      </div></Card>
 
       <SessionDevicePanel currentUser={currentUser} onCurrentSessionRevoked={onCurrentSessionRevoked} />
 
@@ -197,6 +261,6 @@ export default function SecuritySettings({ currentUser, onCurrentSessionRevoked 
 
     {section === 'Audit' && <Card title="Account security audit" detail="Review server-recorded account and session security events. Actor and affected account are shown separately." icon="ScrollText"><AuditLogPanel currentUser={currentUser} /></Card>}
 
-    <footer className="mt-5 flex flex-col gap-2 border-t border-slate-200 pt-4 text-[10px] text-slate-400 sm:flex-row sm:items-center sm:justify-between"><span>Draft control values are not saved or applied.</span><button type="button" disabled className={unavailableButton}><Icons.Save className="size-3.5" />Save requires authentication backend</button></footer>
+    <footer className="mt-5 flex flex-col gap-2 border-t border-slate-200 pt-4 text-[10px] text-slate-400 sm:flex-row sm:items-center sm:justify-between"><span>Role-permission and backup settings remain previews; sign-in and session protections save separately.</span><button type="button" disabled className={unavailableButton}><Icons.Save className="size-3.5" />Preview-only controls</button></footer>
   </div>
 }

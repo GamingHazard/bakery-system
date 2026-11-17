@@ -180,7 +180,7 @@ export default function AppClient({ children }: { children: React.ReactNode }) {
   const [employeeDetailLoading, setEmployeeDetailLoading] = useState(false);
   const [employeeLoadAttempt, setEmployeeLoadAttempt] = useState(0);
   const [publicBrand, setPublicBrand] = useState<PublicCompanyBrand>({
-    companyName: "ANLI ESTABLISHMENT LTD",
+    companyName: "The Sour Dough Bakery",
     logoUrl: "",
   });
   const [companyProfileLoaded, setCompanyProfileLoaded] = useState(false);
@@ -214,13 +214,13 @@ export default function AppClient({ children }: { children: React.ReactNode }) {
       .then((brand) => {
         if (mounted)
           setPublicBrand({
-            companyName: brand.companyName || "ANLI WORKSPACE",
+            companyName: brand.companyName || "Bakery WORKSPACE",
             logoUrl: brand.logoUrl || "",
           });
       })
       .catch(() => {
         if (mounted)
-          setPublicBrand({ companyName: "ANLI WORKSPACE", logoUrl: "" });
+          setPublicBrand({ companyName: "Bakery WORKSPACE", logoUrl: "" });
       });
     return () => {
       mounted = false;
@@ -643,7 +643,9 @@ export default function AppClient({ children }: { children: React.ReactNode }) {
     companyName,
     companyLogoUrl,
     companyProfileEditable:
-      currentUser.roles.includes("Super Admin") &&
+      currentUser.roles.some((role) =>
+        ["Super Admin", "General Manager"].includes(role),
+      ) &&
       companyProfileLoaded &&
       !companyProfileError,
     companyProfileError,

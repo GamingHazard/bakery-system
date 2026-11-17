@@ -5,7 +5,7 @@ const APP_SHELL = [
   "/logo%20512x512.jpeg",
 ];
 
-const CACHE_NAME = "anli-shell-v1";
+const CACHE_NAME = "anli-shell-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -43,6 +43,10 @@ self.addEventListener("fetch", (event) => {
   const isSameOrigin = url.origin === self.location.origin;
 
   if (!isSameOrigin) {
+    return;
+  }
+
+  if (url.pathname.startsWith("/_next/")) {
     return;
   }
 

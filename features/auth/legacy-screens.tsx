@@ -2,7 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as Icons from "lucide-react";
-import { ActiveSession, ApiError, changePassword, reportSessionActivity, signOut, UserAccount } from "@/lib/user-api";
+import {
+  ActiveSession,
+  ApiError,
+  changePassword,
+  reportSessionActivity,
+  signOut,
+  UserAccount,
+} from "@/lib/user-api";
 
 export function LoginScreen({
   onLogin,
@@ -71,7 +78,7 @@ export function LoginScreen({
             <Icons.Sparkles /> Digictal operations
           </div>
           <h1>
-            Anli Establishment
+            {companyName}
             <br />
             <em> Management System.</em>
           </h1>
@@ -508,10 +515,15 @@ export function SessionIdleGuard({
   );
   const remainingSeconds = Math.max(0, Math.ceil((idleDeadline - now) / 1000));
 
-  const syncIdleDeadline = (nextSession: Pick<ActiveSession, "idleExpiresAt" | "absoluteExpiresAt">) => {
+  const syncIdleDeadline = (
+    nextSession: Pick<ActiveSession, "idleExpiresAt" | "absoluteExpiresAt">,
+  ) => {
     const serverDeadline = new Date(nextSession.idleExpiresAt).getTime();
     const absoluteDeadline = new Date(nextSession.absoluteExpiresAt).getTime();
-    if (!Number.isFinite(serverDeadline) || !Number.isFinite(absoluteDeadline)) {
+    if (
+      !Number.isFinite(serverDeadline) ||
+      !Number.isFinite(absoluteDeadline)
+    ) {
       return;
     }
     setIdleDeadline(Math.min(serverDeadline, absoluteDeadline));
@@ -577,7 +589,9 @@ export function SessionIdleGuard({
       "scroll",
     ];
     activityEvents.forEach((eventName) =>
-      window.addEventListener(eventName, refreshSessionActivity, { passive: true }),
+      window.addEventListener(eventName, refreshSessionActivity, {
+        passive: true,
+      }),
     );
     window.addEventListener("focus", refreshSessionActivity);
     document.addEventListener("visibilitychange", refreshSessionActivity);
