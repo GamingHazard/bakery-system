@@ -14,6 +14,10 @@ const nextConfig = {
     return {
       beforeFiles: [
         {
+          source: '/backend-api/:path*',
+          destination: `${apiProxyTarget}/api/:path*`,
+        },
+        {
           source: '/api/:path*',
           destination: `${apiProxyTarget}/api/:path*`,
         },
