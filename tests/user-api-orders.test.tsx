@@ -4,6 +4,7 @@ import {
   createOrder,
   getOrderDetails,
   getPendingOrderCount,
+  listBakeryOrderCatalog,
   listOrders,
 } from "@/lib/user-api";
 
@@ -24,11 +25,11 @@ const orderResponse = {
   customer: { name: "Saved customer" },
   items: [
     {
-      productId: "507f1f77bcf86cd799439013",
-      productName: "Mango juice",
+      variantId: "507f1f77bcf86cd799439013",
+      productName: "Sourdough loaf",
       packs: 2,
-      pricePerPack: 24000,
-      lineTotal: 48000,
+      pricePerPack: 12000,
+      lineTotal: 24000,
     },
   ],
   total: 48000,
@@ -81,6 +82,37 @@ describe("orders API client", () => {
 
     await expect(listOrders()).resolves.toEqual([]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("loads the bakery SKU catalog and rejects invalid available quantities", async () => {
+    const product = {
+      id: "507f1f77bcf86cd799439015",
+      familyId: "507f1f77bcf86cd799439016",
+      familyName: "Sourdough",
+      sku: "SD-LOAF",
+      name: "Sourdough loaf",
+      saleUnit: "loaf",
+      unitsPerSaleUnit: 1,
+      price: 12000,
+      availableQuantity: 4,
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ products: [product] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(listBakeryOrderCatalog()).resolves.toEqual([product]);
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("/orders/bakery-catalog");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({ products: [{ ...product, availableQuantity: -1 }] }),
+      ),
+    );
+    await expect(listBakeryOrderCatalog()).rejects.toThrow(
+      "The bakery order catalog response is invalid.",
+    );
   });
 
   it("loads the pending, non-archived order count without fetching the full order list", async () => {
@@ -149,7 +181,7 @@ describe("orders API client", () => {
     const [order] = await listOrders();
     expect(order.reference).toBe("ORD-2026-000001");
     expect(order.dueDate).toBe("2026-11-23");
-    expect(order.items[0].productId).toBe("507f1f77bcf86cd799439013");
+    expect(order.items[0].variantId).toBe("507f1f77bcf86cd799439013");
   });
 
   it("uses stable cursors across pages without relying on totals", async () => {
@@ -208,7 +240,7 @@ describe("orders API client", () => {
 
     const result = await createOrder({
       customerId: "C-100",
-      items: [{ productId: "507f1f77bcf86cd799439013", packs: 2 }],
+      items: [{ variantId: "507f1f77bcf86cd799439013", packs: 2 }],
       requestedDate: "2026-10-24",
       fulfilmentMethod: "Delivery",
       paymentTerms: "Credit",

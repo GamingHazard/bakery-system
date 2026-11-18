@@ -212,7 +212,7 @@ export function ModulePage({
       />
     );
   if (active === "General Settings")
-    return <GeneralSettings currentUser={currentUser} />;
+    return <GeneralSettings />;
   if (active === "Approvals")
     return (
       <Approvals

@@ -86,7 +86,7 @@ function renderBakeryProduction(options: { canManage?: boolean; canManageInvento
 }
 
 async function openView(label: string) {
-  fireEvent.click(await screen.findByRole('tab', { name: label }))
+  fireEvent.click(await screen.findByRole('tab', { name: (name) => name === label || name.startsWith(`${label} (`) }))
 }
 
 async function openProductEditor() {
@@ -122,6 +122,36 @@ describe('bakery product profile image', () => {
   })
 
   describe('bakery product publication', () => {
+    it('shows the total number of product families in the Products tab', async () => {
+      imageApi.listBakeryProductFamilies.mockResolvedValue({
+        families: [family, { ...family, id: 'FAMILY-2', code: 'CROISSANT', name: 'Croissant', category: 'Pastry' }],
+      })
+      renderBakeryProduction()
+
+      await openView('Products')
+      expect(screen.getByRole('tab', { name: 'Products (2)' })).toBeTruthy()
+
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search products' }), { target: { value: 'Croissant' } })
+      expect(screen.getByRole('tab', { name: 'Products (2)' })).toBeTruthy()
+    })
+
+    it('only offers active Ingredients materials for recipe ingredients', async () => {
+      imageApi.listProductionMaterials.mockResolvedValue({
+        materials: [
+          { id: 'flour', name: 'Bread flour', unit: 'kg', category: 'Ingredients', active: true },
+          { id: 'box', name: 'Bread box', unit: 'each', category: 'Packaging', active: true },
+          { id: 'inactive', name: 'Inactive flour', unit: 'kg', category: 'Ingredients', active: false },
+        ],
+      })
+      renderBakeryProduction()
+
+      await openView('Recipes')
+      const ingredient = await screen.findByLabelText('Ingredient 1')
+      expect(within(ingredient).getByRole('option', { name: 'Bread flour (kg)' })).toBeTruthy()
+      expect(within(ingredient).queryByRole('option', { name: 'Bread box (each)' })).toBeNull()
+      expect(within(ingredient).queryByRole('option', { name: 'Inactive flour (kg)' })).toBeNull()
+    })
+
     it('renders family forms without duplicate React keys', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
@@ -393,7 +423,7 @@ describe('bakery product profile image', () => {
     expect(await screen.findByRole('heading', { name: 'Production overview' })).toBeTruthy()
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       'Overview',
-      'Products',
+      'Products (1)',
       'Recipes',
       'Production batches',
       'Finished stock',

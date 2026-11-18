@@ -2,9 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, ArchiveRestore, Check, ChevronLeft, ChevronRight, CircleX, ClipboardList, Download, Ellipsis, Eye, LoaderCircle, Plus, RefreshCw, Search, X } from 'lucide-react'
-import { createId, exportCsv, formatDate, money, packUnitLabel, type ErpState, type Order, type OrderStatus, type Sale, type SalePayment } from '@/lib/erp'
-import { archiveOrder, changeOrderStatus, confirmOrder, createOrder, fulfillOrder, getOrderDetails, importLegacyOrders, listBakeryOrderCatalog, listBakeryPreorderDemand, listOrders, listProductionProducts, recordOrderPayment, restoreOrder, updateOrder, type BakeryOrderCatalogItem, type OrderInput, type OrderPaymentRecord, type ProductionProduct, type UserAccount } from '@/lib/user-api'
-import { importLegacyOrdersOnce } from '@/lib/order-migration'
+import { createId, exportCsv, formatDate, money, type ErpState, type Order, type OrderStatus, type Sale, type SalePayment } from '@/lib/erp'
+import { archiveOrder, changeOrderStatus, confirmOrder, createOrder, fulfillOrder, getOrderDetails, listBakeryOrderCatalog, listBakeryPreorderDemand, listOrders, recordOrderPayment, restoreOrder, updateOrder, type BakeryOrderCatalogItem, type OrderInput, type OrderPaymentRecord, type UserAccount } from '@/lib/user-api'
 import { canCreateOrders } from '@/lib/authorization'
 
 type Props = {
@@ -18,7 +17,7 @@ type Props = {
 }
 
 type OrderPaymentDraft = { amount: string; date: string; method: SalePayment['method']; txnID: string; note: string }
-type DraftLine = { key: string; productId: string; packs: string; price: string; reason: string }
+type DraftLine = { key: string; variantId: string; quantity: string; price: string; reason: string }
 const methods: SalePayment['method'][] = ['Cash', 'Mobile Money', 'Bank Transfer', 'Check', 'Card']
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Kampala', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 const message = (error: unknown) => error instanceof Error ? error.message : 'The request could not be completed.'
@@ -34,14 +33,13 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
   onSave: (input: OrderInput) => Promise<void>
   onClose: () => void
 }) {
-  const [products, setProducts] = useState<ProductionProduct[]>([])
   const [bakeryProducts, setBakeryProducts] = useState<BakeryOrderCatalogItem[]>([])
   const [productsError, setProductsError] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [customerId, setCustomerId] = useState(order?.customerId || '')
   const [requestedDate, setRequestedDate] = useState(order?.requestedDate || today())
-  const [fulfillmentMode, setFulfillmentMode] = useState<NonNullable<OrderInput['fulfillmentMode']>>(order?.fulfillmentMode || 'legacy_stock')
+  const [fulfillmentMode, setFulfillmentMode] = useState<NonNullable<OrderInput['fulfillmentMode']>>(order?.fulfillmentMode || 'bakery_stock')
   const [fulfilmentMethod, setFulfilmentMethod] = useState<'Delivery' | 'Pickup'>(order?.fulfilmentMethod || 'Delivery')
   const [destination, setDestination] = useState(order?.destination || '')
   const [paymentTerms, setPaymentTerms] = useState<OrderInput['paymentTerms']>(order?.paymentTerms || 'Same-day')
@@ -50,19 +48,14 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
   const [priorityReason, setPriorityReason] = useState(order?.priorityReason || '')
   const [notes, setNotes] = useState(order?.notes || '')
   const [lines, setLines] = useState<DraftLine[]>(order?.items.length
-    ? order.items.map((item, index) => ({ key: item.id || String(index), productId: item.variantId || item.productId || '', packs: String(item.quantity), price: String(item.unitPrice), reason: item.overrideReason || '' }))
-    : [{ key: createId('LINE'), productId: '', packs: '1', price: '', reason: '' }])
+    ? order.items.map((item, index) => ({ key: item.id || String(index), variantId: item.variantId || '', quantity: String(item.quantity), price: String(item.unitPrice), reason: item.overrideReason || '' }))
+    : [{ key: createId('LINE'), variantId: '', quantity: '1', price: '', reason: '' }])
   const idempotencyKey = useRef(createId('ORDER'))
   const canOverride = currentUser.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
-  const total = lines.reduce((sum, line) => sum + (Number(line.packs) || 0) * Number(line.price || 0), 0)
+  const total = lines.reduce((sum, line) => sum + (Number(line.quantity) || 0) * Number(line.price || 0), 0)
 
   useEffect(() => {
     let mounted = true
-    listProductionProducts().then(({ products: records }) => {
-      if (mounted) setProducts(records.filter((product) => product.active && product.packType && product.piecesPerPack && typeof product.price === 'number' && product.price > 0))
-    }).catch((caught: unknown) => {
-      if (mounted) setProductsError(message(caught))
-    })
     listBakeryOrderCatalog().then((records) => {
       if (mounted) setBakeryProducts(records)
     }).catch((caught: unknown) => {
@@ -71,12 +64,10 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
     return () => { mounted = false }
   }, [])
 
-  const selectProduct = (key: string, productId: string) => {
-    const product = fulfillmentMode === 'legacy_stock'
-      ? products.find((item) => item.id === productId)
-      : bakeryProducts.find((item) => item.id === productId)
+  const selectProduct = (key: string, variantId: string) => {
+    const product = bakeryProducts.find((item) => item.id === variantId)
     setLines((current) => current.map((line) => line.key === key
-      ? { ...line, productId, price: product ? String(product.price) : '', reason: '' }
+      ? { ...line, variantId, price: product ? String(product.price) : '', reason: '' }
       : line))
   }
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -88,26 +79,18 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
     }
     try {
       const items = lines.map((line) => {
-        const product = fulfillmentMode === 'legacy_stock'
-          ? products.find((item) => item.id === line.productId)
-          : bakeryProducts.find((item) => item.id === line.productId)
+        const product = bakeryProducts.find((item) => item.id === line.variantId)
         if (!product) throw new Error('Select a valid active catalog product for every line.')
-        const packs = Number(line.packs)
-        if (!Number.isSafeInteger(packs) || packs < 1) throw new Error('Enter a positive whole-number quantity for every product.')
+        const quantity = Number(line.quantity)
+        if (!Number.isSafeInteger(quantity) || quantity < 1) throw new Error('Enter a positive whole-number quantity for every product.')
         const price = Number(line.price)
-        if (!Number.isSafeInteger(price) || price < 1) throw new Error('Enter a positive whole-UGX price per pack.')
+        if (!Number.isSafeInteger(price) || price < 1) throw new Error('Enter a positive whole-UGX price per sale unit.')
         if (price !== product.price && !line.reason.trim()) throw new Error(`Add a reason for overriding ${product.name}'s catalog price.`)
-        return fulfillmentMode === 'legacy_stock'
-          ? {
-              productId: product.id,
-              packs,
-              ...(price !== product.price ? { pricePerPack: price, overrideReason: line.reason.trim() } : {}),
-            }
-          : {
-              variantId: product.id,
-              packs,
-              ...(price !== product.price ? { pricePerPack: price, overrideReason: line.reason.trim() } : {}),
-            }
+        return {
+          variantId: product.id,
+          packs: quantity,
+          ...(price !== product.price ? { pricePerPack: price, overrideReason: line.reason.trim() } : {}),
+        }
       })
       setBusy(true)
       await onSave({
@@ -145,31 +128,24 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
           <label className="text-xs font-semibold">Fulfillment type<select value={fulfillmentMode} onChange={(event) => {
             const nextMode = event.target.value as NonNullable<OrderInput['fulfillmentMode']>
             setFulfillmentMode(nextMode)
-            setLines((current) => current.map((line) => ({ ...line, productId: '', price: '', reason: '' })))
-          }} className={field}><option value="legacy_stock">Legacy product stock</option><option value="bakery_stock">Bakery SKU from available stock</option><option value="preorder">Bakery preorder (future production)</option></select></label>
+            setLines((current) => current.map((line) => ({ ...line, variantId: '', price: '', reason: '' })))
+          }} className={field}><option value="bakery_stock">Bakery SKU from available stock</option><option value="preorder">Bakery preorder (future production)</option></select></label>
           <label className="text-xs font-semibold">Active saved customer<select required disabled={!customersApiLoaded || busy} value={customerId} onChange={(event) => setCustomerId(event.target.value)} className={field}><option value="">Choose customer</option>{state.customers.filter((customer) => customer.status === 'Active' && !customer.archivedAt).map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
           <label className="text-xs font-semibold">Requested fulfilment date<input type="date" required min={today()} value={requestedDate} onChange={(event) => setRequestedDate(event.target.value)} className={field} /></label>
         </div>
         {productsError && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-xs text-rose-800">{productsError}</p>}
         <section>
-          <div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-bold uppercase text-slate-500">Products</h3><button type="button" onClick={() => setLines((current) => [...current, { key: createId('LINE'), productId: '', packs: '1', price: '', reason: '' }])} className="text-xs font-semibold text-primary"><Plus className="mr-1 inline size-3" />Add line</button></div>
+          <div className="mb-2 flex items-center justify-between"><h3 className="text-xs font-bold uppercase text-slate-500">Products</h3><button type="button" onClick={() => setLines((current) => [...current, { key: createId('LINE'), variantId: '', quantity: '1', price: '', reason: '' }])} className="text-xs font-semibold text-primary"><Plus className="mr-1 inline size-3" />Add line</button></div>
           <div className="space-y-3">{lines.map((line, index) => {
-            const legacyProduct = fulfillmentMode === 'legacy_stock' ? products.find((item) => item.id === line.productId) : undefined
-            const bakeryProduct = fulfillmentMode !== 'legacy_stock' ? bakeryProducts.find((item) => item.id === line.productId) : undefined
-            const product = legacyProduct || bakeryProduct
-            const unitLabel = legacyProduct ? packUnitLabel(legacyProduct.packType) : bakeryProduct?.saleUnit || 'unit'
-            const singleUnitLabel = legacyProduct ? packUnitLabel(legacyProduct.packType, 1) : bakeryProduct?.saleUnit || 'unit'
+            const product = bakeryProducts.find((item) => item.id === line.variantId)
+            const unitLabel = product?.saleUnit || 'unit'
             return <div key={line.key} className="grid gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_90px_140px_36px]">
-              <label className="text-xs font-semibold">Product<select required value={line.productId} onChange={(event) => selectProduct(line.key, event.target.value)} className={field}><option value="">Choose product</option>{fulfillmentMode === 'legacy_stock' ? products.map((item) => {
-                const available = item.availablePacks ?? Math.max(0, item.balancePacks - (item.reservedPacks ?? 0))
-                return <option key={item.id} value={item.id}>{item.name} · {money(item.price || 0)}/{item.packType} · {available.toLocaleString()} {packUnitLabel(item.packType, available)} available</option>
-              }) : bakeryProducts.map((item) => <option key={item.id} value={item.id}>{item.familyName} · {item.sku} · {money(item.price)}/{item.saleUnit} · {item.availableQuantity.toLocaleString()} available</option>)}</select></label>
-              <label className="text-xs font-semibold">Quantity ({unitLabel})<input type="number" required min="1" step="1" value={line.packs} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, packs: event.target.value } : draft))} className={field} /></label>
-              <label className="text-xs font-semibold">Price per {singleUnitLabel}<input type="number" required min="1" step="1" value={line.price} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, price: event.target.value } : draft))} className={field} /></label>
+              <label className="text-xs font-semibold">Product<select required value={line.variantId} onChange={(event) => selectProduct(line.key, event.target.value)} className={field}><option value="">Choose product</option>{bakeryProducts.map((item) => <option key={item.id} value={item.id}>{item.familyName} · {item.sku} · {money(item.price)}/{item.saleUnit} · {item.availableQuantity.toLocaleString()} available</option>)}</select></label>
+              <label className="text-xs font-semibold">Quantity ({unitLabel})<input type="number" required min="1" step="1" value={line.quantity} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, quantity: event.target.value } : draft))} className={field} /></label>
+              <label className="text-xs font-semibold">Price per {unitLabel}<input type="number" required min="1" step="1" value={line.price} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, price: event.target.value } : draft))} className={field} /></label>
               <button type="button" aria-label={`Remove line ${index + 1}`} disabled={lines.length === 1} onClick={() => setLines((current) => current.filter((draft) => draft.key !== line.key))} className="self-end rounded p-2 text-slate-400 disabled:opacity-30"><X className="size-4" /></button>
               {product && Number(line.price) !== product.price && <label className="text-xs font-semibold sm:col-span-4">Price override reason<input required value={line.reason} onChange={(event) => setLines((current) => current.map((draft) => draft.key === line.key ? { ...draft, reason: event.target.value } : draft))} disabled={!canOverride} className={field} />{!canOverride && <span className="text-rose-700">You cannot override catalog pricing.</span>}</label>}
-              {legacyProduct && <p className="text-[11px] text-slate-500 sm:col-span-4">On hand: {legacyProduct.balancePacks.toLocaleString()} {packUnitLabel(legacyProduct.packType, legacyProduct.balancePacks)} · Reserved: {(legacyProduct.reservedPacks ?? 0).toLocaleString()} {packUnitLabel(legacyProduct.packType, legacyProduct.reservedPacks ?? 0)} · Available: {(legacyProduct.availablePacks ?? Math.max(0, legacyProduct.balancePacks - (legacyProduct.reservedPacks ?? 0))).toLocaleString()} {packUnitLabel(legacyProduct.packType, legacyProduct.availablePacks ?? Math.max(0, legacyProduct.balancePacks - (legacyProduct.reservedPacks ?? 0)))}. Stock is checked again when this order is confirmed.</p>}
-              {bakeryProduct && <p className="text-[11px] text-slate-500 sm:col-span-4">{bakeryProduct.availableQuantity.toLocaleString()} {bakeryProduct.saleUnit} currently available. {fulfillmentMode === 'preorder' ? 'Production capacity and the promised date are reviewed before confirmation.' : 'Lot availability and expiry are checked again when this order is confirmed.'}</p>}
+              {product && <p className="text-[11px] text-slate-500 sm:col-span-4">{product.availableQuantity.toLocaleString()} {product.saleUnit} currently available. {fulfillmentMode === 'preorder' ? 'Production capacity and the promised date are reviewed before confirmation.' : 'Lot availability and expiry are checked again when this order is confirmed.'}</p>}
             </div>
           })}</div>
           <div className="mt-3 text-right text-sm font-bold">Estimated total: {money(total)} <span className="text-xs font-normal text-slate-400">(server verifies)</span></div>
@@ -184,7 +160,7 @@ function OrderEditor({ order, state, currentUser, customersLoaded, customersApiL
           <label className="text-xs font-semibold sm:col-span-2">Order notes<textarea value={notes} maxLength={2000} onChange={(event) => setNotes(event.target.value)} className={field} /></label>
         </div>
         {error && <p role="alert" className="rounded-lg bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
-        <footer className="sticky bottom-0 -mx-4 -mb-24 flex justify-end gap-2 border-t bg-white px-4 py-3 sm:static sm:mx-0 sm:mb-0 sm:border-0 sm:px-0 sm:pt-4"><button type="button" onClick={onClose} disabled={busy} className="min-h-11 rounded-lg border px-4 py-2 text-xs font-semibold sm:min-h-0">Cancel</button><button type="submit" disabled={busy || (fulfillmentMode === 'legacy_stock' ? !products.length : !bakeryProducts.length) || !customersApiLoaded} className="min-h-11 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50 sm:min-h-0">{busy ? 'Saving…' : order ? 'Save changes' : 'Create pending order'}</button></footer>
+        <footer className="sticky bottom-0 -mx-4 -mb-24 flex justify-end gap-2 border-t bg-white px-4 py-3 sm:static sm:mx-0 sm:mb-0 sm:border-0 sm:px-0 sm:pt-4"><button type="button" onClick={onClose} disabled={busy} className="min-h-11 rounded-lg border px-4 py-2 text-xs font-semibold sm:min-h-0">Cancel</button><button type="submit" disabled={busy || !bakeryProducts.length || !customersApiLoaded} className="min-h-11 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground disabled:opacity-50 sm:min-h-0">{busy ? 'Saving…' : order ? 'Save changes' : 'Create pending order'}</button></footer>
       </form>
     </section>
   </div>
@@ -194,7 +170,6 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [migrationWarning, setMigrationWarning] = useState('')
   const [attempt, setAttempt] = useState(0)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
@@ -245,12 +220,9 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
   const load = async () => {
     setLoading(true)
     setLoadError('')
-    let warning = ''
     try {
-      warning = await importLegacyOrdersOnce(canManage, state.orders, importLegacyOrders)
       const result = await listOrders()
       setOrders(result)
-      setMigrationWarning(warning)
       onStateChange({ ...state, orders: result })
       try {
         setPreorderDemands(await listBakeryPreorderDemand())
@@ -260,7 +232,6 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
       }
     } catch (caught) {
       setLoadError(message(caught))
-      setMigrationWarning(warning)
     } finally {
       setLoading(false)
     }
@@ -374,13 +345,13 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
   const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
   const pageOrders = filtered.slice((page - 1) * pageSize, page * pageSize)
   useEffect(() => { if (page > pageCount) setPage(pageCount) }, [page, pageCount])
-  const activeOrders = orders.filter((order) => !order.legacyImported && !order.archivedAt && !['Completed', 'Cancelled'].includes(order.status))
+  const activeOrders = orders.filter((order) => !order.archivedAt && !['Completed', 'Cancelled'].includes(order.status))
   const orderSummary = {
     total: orders.length,
     pending: activeOrders.filter((order) => order.status === 'Pending').length,
     inProgress: activeOrders.filter((order) => ['Confirmed', 'In progress'].includes(order.status)).length,
     ready: activeOrders.filter((order) => order.status === 'Ready').length,
-    completedValue: orders.filter((order) => order.status === 'Completed' && !order.legacyImported)
+    completedValue: orders.filter((order) => order.status === 'Completed')
       .reduce((sum, order) => sum + order.total, 0),
     openBalance: activeOrders.reduce((sum, order) => sum + Math.max(0, order.total - (order.paidAmount ?? 0)), 0),
   }
@@ -436,7 +407,6 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
 
   return <section className="animate-in fade-in duration-300">
     <header className="mb-5 space-y-3 sm:flex sm:flex-wrap sm:items-end sm:justify-between sm:gap-3 sm:space-y-0"><div><div className="text-xs text-slate-400">Workspace / Sales Department</div><h2 className="mt-1 text-2xl font-bold">Orders</h2><p className="mt-1 text-sm text-slate-500">Confirm orders to reserve stock; fulfillment creates one sale and dispatches stock.</p></div><div className="grid grid-cols-2 gap-2 sm:flex"><button type="button" onClick={() => setAttempt((value) => value + 1)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold sm:min-h-0"><RefreshCw className="size-4" /> Refresh</button>{canCreate && <button type="button" onClick={() => setEditor(null)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground sm:min-h-0"><Plus className="size-4" /> Create order</button>}</div></header>
-    {migrationWarning && <p role="status" className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">{migrationWarning}<button type="button" onClick={() => setAttempt((value) => value + 1)} className="ml-2 underline">Retry import</button></p>}
     {error && <p role="alert" className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
     <section aria-label="Order summary from backend" className="mb-5">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-bold text-slate-800">Order summary</h3><span className="text-[11px] text-slate-400">Based on {orders.length} orders loaded from the server</span></div>
@@ -480,12 +450,12 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
         <div className="mt-3 grid grid-cols-2 gap-3 text-xs"><div><span className="block text-[10px] text-slate-400">Requested</span><strong>{formatDate(order.requestedDate)}</strong></div><div><span className="block text-[10px] text-slate-400">Total / paid</span><strong>{money(order.total)}</strong><span className="block text-[10px] text-slate-400">Paid {money(order.paidAmount ?? 0)}</span></div></div>
         <p className="mt-3 line-clamp-2 text-xs text-slate-600">{order.items.map((item) => `${item.product} × ${item.quantity}`).join(', ')}</p>
         <div className="mt-4 flex items-center justify-between gap-2 border-t pt-3"><span className={`text-xs font-semibold ${order.priority === 'High' ? 'text-amber-700' : 'text-slate-500'}`}>{order.priority} priority{order.reserved ? ' · Reserved' : ''}</span><div className="relative flex gap-2"><button type="button" aria-label={`Details for ${order.reference} on mobile`} onClick={() => { void openDetails(order) }} className="inline-flex min-h-11 items-center rounded-lg border px-3 text-xs font-semibold">Details</button>{canManage && <button type="button" aria-label={`Process ${order.reference} on mobile`} aria-expanded={openActionMenuFor === order.id} onClick={() => setOpenActionMenuFor((current) => current === order.id ? null : order.id)} className="grid size-11 place-items-center rounded-lg border"><Ellipsis className="size-4" /></button>}{canManage && openActionMenuFor === order.id && <div role="menu" aria-label={`Process ${order.reference}`} className="fixed inset-x-0 bottom-0 z-[70] rounded-t-2xl border-t bg-white p-3 pb-[max(12px,env(safe-area-inset-bottom))] shadow-2xl md:hidden">
-          {order.status === 'Pending' && !order.legacyImported && <><button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); setEditor(order) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Edit order</button><button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); beginConfirmation(order) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium text-emerald-800">{order.fulfillmentMode === 'preorder' ? 'Review and confirm date' : 'Confirm'}</button></>}
-          {order.status === 'Confirmed' && !order.legacyImported && <button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'In progress') }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Start order</button>}
-          {order.status === 'In progress' && !order.legacyImported && <button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Ready') }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Mark ready</button>}
-          {['Pending', 'Confirmed', 'In progress', 'Ready'].includes(order.status) && !order.legacyImported && <button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Cancelled', order.status === 'Ready' ? window.prompt('Reason for cancelling a ready order?') || '' : '') }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium text-rose-700">Cancel order</button>}
-          {order.status !== 'Cancelled' && order.status !== 'Completed' && !order.legacyImported && <button type="button" onClick={() => { setOpenActionMenuFor(null); beginPayment(order) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Record payment</button>}
-          {order.status === 'Ready' && order.reserved && !order.legacyImported && <button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void fulfill(order) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium text-primary">Fulfill order</button>}
+          {order.status === 'Pending' && <><button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); setEditor(order) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Edit order</button><button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); beginConfirmation(order) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium text-emerald-800">{order.fulfillmentMode === 'preorder' ? 'Review and confirm date' : 'Confirm'}</button></>}
+          {order.status === 'Confirmed' && <button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'In progress') }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Start order</button>}
+          {order.status === 'In progress' && <button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Ready') }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Mark ready</button>}
+          {['Pending', 'Confirmed', 'In progress', 'Ready'].includes(order.status) && <button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Cancelled', order.status === 'Ready' ? window.prompt('Reason for cancelling a ready order?') || '' : '') }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium text-rose-700">Cancel order</button>}
+          {order.status !== 'Cancelled' && order.status !== 'Completed' && <button type="button" onClick={() => { setOpenActionMenuFor(null); beginPayment(order) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Record payment</button>}
+          {order.status === 'Ready' && order.reserved && <button type="button" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void fulfill(order) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium text-primary">Fulfill order</button>}
           {['Completed', 'Cancelled'].includes(order.status) && !order.archivedAt && <button type="button" onClick={() => { setOpenActionMenuFor(null); void perform(order, async () => archiveOrder(order.id)) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Archive order</button>}
           {order.archivedAt && <button type="button" onClick={() => { setOpenActionMenuFor(null); void perform(order, () => restoreOrder(order.id)) }} className="min-h-11 w-full rounded-lg px-3 text-left text-sm font-medium">Restore order</button>}
           <button type="button" onClick={() => setOpenActionMenuFor(null)} className="mt-1 min-h-11 w-full rounded-lg border text-sm font-semibold">Close</button>
@@ -505,15 +475,15 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
               ><Ellipsis className="size-4" /></button>
               {openActionMenuFor === order.id && <div role="menu" aria-label={`Actions for ${order.reference}`} className="absolute right-0 top-full z-30 mt-1 min-w-40 rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">
                 <button type="button" role="menuitem" onClick={() => { setOpenActionMenuFor(null); void openDetails(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">View details</button>
-                {canManage && order.status === 'Pending' && !order.legacyImported && <>
+                {canManage && order.status === 'Pending' && <>
                   <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); setEditor(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50 disabled:opacity-50">Edit order</button>
                   <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); beginConfirmation(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-emerald-800 hover:bg-emerald-50 disabled:opacity-50">{order.fulfillmentMode === 'preorder' ? 'Review and confirm date' : 'Confirm'}</button>
                 </>}
-                {canManage && !order.legacyImported && order.status === 'Confirmed' && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'In progress') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50 disabled:opacity-50">Start order</button>}
-                {canManage && !order.legacyImported && order.status === 'In progress' && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Ready') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50 disabled:opacity-50">Mark ready</button>}
-                {canManage && !order.legacyImported && ['Pending', 'Confirmed', 'In progress', 'Ready'].includes(order.status) && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Cancelled', order.status === 'Ready' ? window.prompt('Reason for cancelling a ready order?') || '' : '') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50">Cancel order</button>}
-                {canManage && order.status !== 'Cancelled' && order.status !== 'Completed' && !order.legacyImported && <button type="button" role="menuitem" onClick={() => { setOpenActionMenuFor(null); beginPayment(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">Record payment</button>}
-                {canManage && !order.legacyImported && order.status === 'Ready' && order.reserved && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void fulfill(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-primary hover:bg-slate-50 disabled:opacity-50">Fulfill order</button>}
+                {canManage && order.status === 'Confirmed' && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'In progress') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50 disabled:opacity-50">Start order</button>}
+                {canManage && order.status === 'In progress' && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Ready') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50 disabled:opacity-50">Mark ready</button>}
+                {canManage && ['Pending', 'Confirmed', 'In progress', 'Ready'].includes(order.status) && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void updateStatus(order, 'Cancelled', order.status === 'Ready' ? window.prompt('Reason for cancelling a ready order?') || '' : '') }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50">Cancel order</button>}
+                {canManage && order.status !== 'Cancelled' && order.status !== 'Completed' && <button type="button" role="menuitem" onClick={() => { setOpenActionMenuFor(null); beginPayment(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">Record payment</button>}
+                {canManage && order.status === 'Ready' && order.reserved && <button type="button" role="menuitem" disabled={busyId === order.id} onClick={() => { setOpenActionMenuFor(null); void fulfill(order) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium text-primary hover:bg-slate-50 disabled:opacity-50">Fulfill order</button>}
                 {canManage && ['Completed', 'Cancelled'].includes(order.status) && !order.archivedAt && <button type="button" role="menuitem" onClick={() => { setOpenActionMenuFor(null); void perform(order, async () => archiveOrder(order.id)) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">Archive order</button>}
                 {canManage && order.archivedAt && <button type="button" role="menuitem" onClick={() => { setOpenActionMenuFor(null); void perform(order, () => restoreOrder(order.id)) }} className="w-full rounded-md px-3 py-2 text-left text-xs font-medium hover:bg-slate-50">Restore order</button>}
               </div>}
@@ -530,7 +500,7 @@ export default function OrdersManagement({ state, currentUser, customersLoaded, 
     {detail && <div className="fixed inset-0 z-[80] grid items-end bg-slate-950/40 sm:place-items-center sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) { detailRequest.current += 1; setDetail(null) } }}><section role="dialog" aria-modal="true" aria-labelledby="order-details-title" className="max-h-[96vh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-white shadow-2xl sm:max-h-[90vh] sm:rounded-xl"><header className="sticky top-0 flex items-start justify-between border-b bg-white p-4 sm:p-5"><div><h2 id="order-details-title" className="font-bold">{detail.reference}</h2><p className="mt-1 text-xs text-slate-500">{detail.customer} · {detail.status}</p></div><button type="button" aria-label="Close order details" className="grid size-11 place-items-center sm:size-auto" onClick={() => { detailRequest.current += 1; setDetail(null) }}><X className="size-4" /></button></header><div className="space-y-5 p-4 sm:p-5">
       {detailLoading && <p role="status" className="text-xs text-slate-500">Loading order history from the server…</p>}
       {detailError && <p role="alert" className="rounded bg-rose-50 p-3 text-xs text-rose-800">{detailError}</p>}
-      <div className="grid gap-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-slate-400">Order date</span><p>{formatDate(detail.date)}</p></div><div><span className="text-xs text-slate-400">Requested</span><p>{formatDate(detail.requestedDate)}</p></div>{detail.fulfillmentMode === 'preorder' && <div><span className="text-xs text-slate-400">Promised</span><p>{detail.promisedDate ? formatDate(detail.promisedDate) : 'Awaiting staff review'}</p></div>}<div><span className="text-xs text-slate-400">Fulfillment type</span><p>{detail.fulfillmentMode === 'preorder' ? 'Bakery preorder' : detail.fulfillmentMode === 'bakery_stock' ? 'Bakery stock' : 'Legacy stock'}</p></div><div><span className="text-xs text-slate-400">Fulfilment</span><p>{detail.fulfilmentMethod} {detail.destination}</p></div><div><span className="text-xs text-slate-400">Payment terms</span><p>{detail.paymentTerms}{detail.dueDate ? ` · Due ${formatDate(detail.dueDate)}` : ''}</p></div><div><span className="text-xs text-slate-400">Payment summary</span><p>Paid {money(detail.paidAmount ?? 0)} / {money(detail.total)} · Balance {money(Math.max(0, detail.total - (detail.paidAmount ?? 0)))}</p></div><div><span className="text-xs text-slate-400">Inventory reservation</span><p>{detail.reserved ? 'Reserved' : 'Not reserved'}</p></div></div>
+      <div className="grid gap-3 text-sm sm:grid-cols-2"><div><span className="text-xs text-slate-400">Order date</span><p>{formatDate(detail.date)}</p></div><div><span className="text-xs text-slate-400">Requested</span><p>{formatDate(detail.requestedDate)}</p></div>{detail.fulfillmentMode === 'preorder' && <div><span className="text-xs text-slate-400">Promised</span><p>{detail.promisedDate ? formatDate(detail.promisedDate) : 'Awaiting staff review'}</p></div>}<div><span className="text-xs text-slate-400">Fulfillment type</span><p>{detail.fulfillmentMode === 'preorder' ? 'Bakery preorder' : 'Bakery stock'}</p></div><div><span className="text-xs text-slate-400">Fulfilment</span><p>{detail.fulfilmentMethod} {detail.destination}</p></div><div><span className="text-xs text-slate-400">Payment terms</span><p>{detail.paymentTerms}{detail.dueDate ? ` · Due ${formatDate(detail.dueDate)}` : ''}</p></div><div><span className="text-xs text-slate-400">Payment summary</span><p>Paid {money(detail.paidAmount ?? 0)} / {money(detail.total)} · Balance {money(Math.max(0, detail.total - (detail.paidAmount ?? 0)))}</p></div><div><span className="text-xs text-slate-400">Inventory reservation</span><p>{detail.reserved ? 'Reserved' : 'Not reserved'}</p></div></div>
       <div><h3 className="mb-2 text-xs font-bold uppercase text-slate-500">Order items</h3><div className="divide-y border-y">{detail.items.map((item) => <div key={item.id} className="flex justify-between gap-3 py-2 text-sm"><span>{item.product} × {item.quantity} @ {money(item.unitPrice)}</span><strong>{money(item.lineTotal)}</strong></div>)}<div className="py-3 text-right font-bold">Total {money(detail.total)}</div></div></div>
       {detail.notes && <p className="whitespace-pre-wrap text-sm">{detail.notes}</p>}
       <div><h3 className="mb-2 text-xs font-bold uppercase text-slate-500">Payment history</h3>{detailPayments.length ? <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-slate-50 text-slate-500"><tr>{['Date', 'Method', 'Transaction', 'Amount'].map((label) => <th key={label} className="px-2 py-2">{label}</th>)}</tr></thead><tbody>{detailPayments.map((payment) => <tr key={payment.id} className="border-t"><td className="px-2 py-2">{formatDate(payment.date)}</td><td className="px-2 py-2">{payment.method}</td><td className="px-2 py-2">{payment.txnID || payment.note || '—'}</td><td className="px-2 py-2 font-semibold">{money(payment.amount)}</td></tr>)}</tbody></table></div> : <p className="text-xs text-slate-500">{detailLoading ? 'Loading payments…' : 'No payments recorded.'}</p>}</div>

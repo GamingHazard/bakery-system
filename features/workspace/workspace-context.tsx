@@ -41,7 +41,6 @@ export type WorkspaceContextValue = {
   customerCanArchive: boolean;
   salesLoaded: boolean;
   salesLoadError: string;
-  salesMigrationWarning: string;
   retrySales: () => void;
   salesCanRead: boolean;
   canReadAssets: boolean;

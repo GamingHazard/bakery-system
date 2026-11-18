@@ -230,20 +230,15 @@ export type OrderApiRecord = {
   };
   items: Array<{
     lineId?: string;
-    productId?: string | null;
     variantId?: string | null;
     productCode?: string;
     sku?: string;
     productName: string;
-    packType?: "Box" | "Carton" | null;
     saleUnit?: string;
-    piecesPerPack?: number | null;
     unitsPerSaleUnit?: number | null;
     packs: number;
     reservedQuantity?: number;
     outstandingQuantity?: number;
-    quantityPieces?: number | null;
-    catalogPricePerPack?: number | null;
     pricePerPack: number;
     overrideReason?: string;
     lineTotal: number;
@@ -253,7 +248,7 @@ export type OrderApiRecord = {
   date: string;
   requestedDate: string;
   promisedDate?: string;
-  fulfillmentMode?: "legacy_stock" | "bakery_stock" | "preorder";
+  fulfillmentMode?: "bakery_stock" | "preorder";
   fulfilmentMethod: "Delivery" | "Pickup";
   destination: string;
   paymentTerms: "Paid now" | "Same-day" | "Credit";
@@ -274,7 +269,6 @@ export type OrderApiRecord = {
   notes: string;
   reserved: boolean;
   saleId?: string | null;
-  legacyImported?: boolean;
   createdAt: string;
 };
 
@@ -292,14 +286,13 @@ export type OrderPaymentRecord = {
 export type OrderInput = {
   customerId: string;
   items: Array<{
-    productId?: string;
     variantId?: string;
     packs: number;
     pricePerPack?: number;
     overrideReason?: string;
   }>;
   requestedDate: string;
-  fulfillmentMode?: "legacy_stock" | "bakery_stock" | "preorder";
+  fulfillmentMode?: "bakery_stock" | "preorder";
   fulfilmentMethod: "Delivery" | "Pickup";
   destination?: string;
   paymentTerms: "Paid now" | "Same-day" | "Credit";
@@ -671,36 +664,6 @@ export type ProductionIngredient = {
   quantityPerTank: number;
 };
 
-export type ProductionRecipe = {
-  id: string;
-  productId: string;
-  version: number;
-  ingredients: ProductionIngredient[];
-};
-
-export type ProductionProduct = {
-  id: string;
-  code: string;
-  name: string;
-  category: "Cup" | "Bottle";
-  unit: string;
-  flavour: "Mango" | "Pineapple milk";
-  packType: "Box" | "Carton";
-  piecesPerPack: number;
-  packWeightKg: number;
-  price?: number;
-  recipeRequired: boolean;
-  active: boolean;
-  balancePacks: number;
-  reservedPacks?: number;
-  availablePacks?: number;
-  loosePieces?: number;
-  inventoryEffectiveDate?: string;
-  recipe: ProductionRecipe | null;
-  activeRecipeId?: string | null;
-  createdAt: string;
-};
-
 export type ProductionMaterial = {
   id: string;
   code: string;
@@ -824,8 +787,6 @@ export type InventoryResponsibleUser = {
 export type ProductionMaterialUsageRecord = {
   id: string;
   reference: string;
-  productionRunId?: string;
-  productId: string;
   productName: string;
   productionDate: string;
   tanksProduced: number;
@@ -836,33 +797,6 @@ export type ProductionMaterialUsageRecord = {
   lines: Array<ProductionIngredient & { totalQuantity: number; lotAllocations?: RawMaterialLotAllocation[] }>;
   actor: string;
   updatedBy?: string;
-  createdAt: string;
-};
-
-export type ProductionRunRecord = {
-  id: string;
-  reference: string;
-  productId: string;
-  productName: string;
-  productUnit: string;
-  recipeId?: string | null;
-  recipeVersion?: number | null;
-  productionDate: string;
-  inventoryUnit?: "piece_legacy" | "pack";
-  packTypeSnapshot?: "Box" | "Carton";
-  piecesPerPackSnapshot?: number;
-  openingStockPacks?: number;
-  salesQuantityPacks?: number;
-  damagedQuantityPacks?: number;
-  closingStockPacks?: number;
-  producedQuantityPacks?: number;
-  openingStockPieces?: number;
-  salesQuantityPieces?: number;
-  damagedQuantityPieces?: number;
-  closingStockPieces?: number;
-  producedQuantityPieces?: number;
-  damageReason?: string;
-  lines: Array<ProductionIngredient & { totalQuantity: number }>;
   createdAt: string;
 };
 
@@ -1014,97 +948,6 @@ export type BakeryFinishedStockMovementRecord = {
   sourceType: string;
   actor: string;
 };
-
-export type FinishedMovementRecord = {
-  id: string;
-  productId: string;
-  type: string;
-  direction: "in" | "out";
-  inventoryUnit?: "piece_legacy" | "pack";
-  quantityPacks?: number;
-  packTypeSnapshot?: "Box" | "Carton";
-  piecesPerPackSnapshot?: number;
-  quantityPieces?: number;
-  date: string;
-  reference: string;
-  reason: string;
-  productName: string;
-  createdAt: string;
-};
-
-export type DailyProductionStockSummary = {
-  productId: string;
-  productionDate: string;
-  packType: "Box" | "Carton";
-  piecesPerPack: number;
-  openingStockPacks: number;
-  salesQuantityPacks: number;
-  otherMovementNetPacks: number;
-  loosePieces: number;
-};
-
-type ProductInput = {
-  code: string;
-  name: string;
-  category: "Cup" | "Bottle";
-  unit: string;
-  flavour: "Mango" | "Pineapple milk";
-  packType?: "Box" | "Carton";
-  piecesPerPack?: number;
-  packWeightKg?: number;
-  price: number;
-  packagingMaterials?: Array<{ materialId: string; quantityPerSaleUnit: number }>;
-  recipeRequired: boolean;
-  ingredients?: Array<{
-    materialId: string;
-    quantityPerTank: number;
-  }>;
-};
-
-export async function listProductionProducts() {
-  return request<{ products: ProductionProduct[] }>("/production/products");
-}
-
-export async function createProductionProduct(input: ProductInput) {
-  return request<{ product: ProductionProduct }>("/production/products", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-export async function updateProductionProduct(
-  id: string,
-  input: Omit<
-    Partial<ProductInput>,
-    "packType" | "piecesPerPack" | "packWeightKg"
-  > & {
-    packType?: "Box" | "Carton";
-    piecesPerPack?: number;
-    packWeightKg?: number;
-    active?: boolean;
-  },
-) {
-  return request<{ product: ProductionProduct }>(
-    `/production/products/${encodeURIComponent(id)}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify(input),
-    },
-  );
-}
-
-export async function updateProductionRecipe(
-  id: string,
-  ingredients: NonNullable<ProductInput["ingredients"]>,
-) {
-  return request<{ recipe: ProductionRecipe }>(
-    `/production/products/${encodeURIComponent(id)}/recipe`,
-    {
-      method: "PUT",
-      body: JSON.stringify({ ingredients }),
-    },
-  );
-}
 
 export async function listBakeryProductFamilies() {
   return request<{ families: BakeryProductFamily[] }>("/production/bakery/families");
@@ -1392,19 +1235,12 @@ type ApiSale = {
   company: SaleCompanySnapshot;
   date: string;
   lines: SaleLine[];
-  legacyImported?: boolean;
-  legacyProduct?: string;
-  legacyQuantity?: number;
-  legacyMethod?: string;
-  legacyTxnID?: string;
   total: number;
   paidAmount: number;
   paymentTerms: Sale["paymentTerms"];
   dueDate?: string;
   payments?: ApiPayment[];
   createdAt: string;
-  bonusSnapshot?: Sale["bonusSnapshot"];
-  bonusDisabledReason?: string;
 };
 
 function normalizeSalePayment(payment: ApiPayment): SalePayment {
@@ -1437,18 +1273,14 @@ function normalizeSale(sale: ApiSale): { sale: Sale; payments: SalePayment[] } {
       customerId: sale.customerId || undefined,
       assignedTo: sale.assignedTo || undefined,
       createdByName: sale.createdByName || undefined,
-      product:
-        sale.legacyProduct || lines.map((line) => line.productName).join(", "),
-      quantity:
-        sale.legacyQuantity ??
-        lines.reduce((total, line) => total + line.packs, 0),
+      product: lines.map((line) => line.productName).join(", "),
+      quantity: lines.reduce((total, line) => total + line.packs, 0),
       total: sale.total,
       status: sale.paidAmount >= sale.total ? "Paid" : "Pending",
       method:
         lastPayment?.method ||
-        sale.legacyMethod ||
         (sale.paymentTerms === "Credit" ? "Credit terms" : "Unpaid"),
-      txnID: lastPayment?.txnID || sale.legacyTxnID || undefined,
+      txnID: lastPayment?.txnID || undefined,
       paymentTerms: sale.paymentTerms,
       dueDate: sale.dueDate,
       lines,
@@ -1456,9 +1288,6 @@ function normalizeSale(sale: ApiSale): { sale: Sale; payments: SalePayment[] } {
       companySnapshot: sale.company,
       paidAmount: sale.paidAmount,
       payments,
-      legacyImported: sale.legacyImported,
-      bonusSnapshot: sale.bonusSnapshot,
-      bonusDisabledReason: sale.bonusDisabledReason || undefined,
     },
     payments,
   };
@@ -1471,7 +1300,7 @@ export type CreateSaleInput = {
     "name" | "contact" | "phone" | "email" | "address" | "tin"
   >;
   lines: Array<{
-    productId: string;
+    variantId: string;
     packs: number;
     pricePerPack?: number;
     overrideReason?: string;
@@ -1482,8 +1311,6 @@ export type CreateSaleInput = {
   initialPaymentMethod?: SalePayment["method"];
   initialPaymentTxnID?: string;
   idempotencyKey: string;
-  bonusDisabled?: boolean;
-  bonusDisabledReason?: string;
 };
 
 export async function listSales() {
@@ -1509,74 +1336,6 @@ export async function listSales() {
     if (cursor) visited.add(cursor);
   } while (cursor);
   return { sales, payments };
-}
-
-export async function importLegacySales(
-  sales: Sale[],
-  payments: SalePayment[],
-) {
-  const imported: string[] = [];
-  const duplicates: string[] = [];
-  const rejected: { id: string; reason: string }[] = [];
-  const batchCount = Math.max(1, Math.ceil(sales.length / 200));
-  for (let batchIndex = 0; batchIndex < batchCount; batchIndex += 1) {
-    const batchSales = sales.slice(batchIndex * 200, (batchIndex + 1) * 200);
-    const batchIds = new Set(batchSales.map((sale) => sale.id));
-    const batchPayments = payments.filter((payment) =>
-      batchIds.has(payment.saleId),
-    );
-    if (batchPayments.length > 1000) {
-      throw new ApiError(
-        "A legacy sales batch contains more than 1,000 payments for 200 sales. Local data was retained; import smaller history groups.",
-        400,
-      );
-    }
-    if (batchIndex === batchCount - 1) {
-      batchPayments.push(
-        ...payments.filter(
-          (payment) => !sales.some((sale) => sale.id === payment.saleId),
-        ),
-      );
-    }
-    const result = await request<{
-      imported: string[];
-      duplicates: string[];
-      rejected: { id: string; reason: string }[];
-    }>("/sales/legacy-import", {
-      method: "POST",
-      body: JSON.stringify({
-        sales: batchSales.map((sale) => ({
-          id: sale.id,
-          reference: sale.reference,
-          date: sale.date,
-          customer: sale.customer,
-          customerId: sale.customerId,
-          product: sale.product,
-          quantity: sale.quantity,
-          total: sale.total,
-          status: sale.status,
-          method: sale.method,
-          txnID: sale.txnID,
-          paymentTerms: sale.paymentTerms,
-          dueDate: sale.dueDate,
-        })),
-        payments: batchPayments.map((payment) => ({
-          id: payment.id,
-          saleId: payment.saleId,
-          amount: payment.amount,
-          date: payment.date,
-          method: payment.method,
-          txnID: payment.txnID,
-          note: payment.note,
-          recordedAt: payment.recordedAt,
-        })),
-      }),
-    });
-    imported.push(...result.imported);
-    duplicates.push(...result.duplicates);
-    rejected.push(...result.rejected);
-  }
-  return { imported, duplicates, rejected };
 }
 
 export async function createSale(input: CreateSaleInput) {
@@ -2068,10 +1827,7 @@ export async function postProductionMaterialUsage(
     tanksProduced: number;
     location: string;
     idempotencyKey: string;
-  } & (
-    | { productionRunId: string }
-    | { productId: string; productionDate: string }
-  ),
+  } & { batchId: string; variantId: string; productionDate: string },
 ) {
   return request<{ usage: ProductionMaterialUsageRecord; replayed?: boolean }>(
     "/production/materials/production-usages",
@@ -2085,7 +1841,8 @@ export async function postProductionMaterialUsage(
 export async function updateProductionMaterialUsage(
   id: string,
   input: {
-    productId: string;
+    batchId: string;
+    variantId: string;
     productionDate: string;
     tanksProduced: number;
     location: string;
@@ -2095,79 +1852,6 @@ export async function updateProductionMaterialUsage(
     `/production/materials/production-usages/${encodeURIComponent(id)}`,
     {
       method: "PATCH",
-      body: JSON.stringify(input),
-    },
-  );
-}
-
-export async function listProductionRuns() {
-  return request<{ runs: ProductionRunRecord[] }>("/production/runs?limit=200");
-}
-
-export async function getDailyProductionStockSummary(
-  productId: string,
-  date: string,
-) {
-  const params = new URLSearchParams({ productId, date });
-  return request<DailyProductionStockSummary>(
-    `/production/runs/daily-stock-summary?${params}`,
-  );
-}
-
-export async function postProductionRun(input: {
-  productId: string;
-  productionDate: string;
-  openingStockPacks: number;
-  damagedQuantityPacks: number;
-  closingStockPacks: number;
-  damageReason?: string;
-  idempotencyKey: string;
-}) {
-  return request<{ run: ProductionRunRecord; balancePacks: number }>(
-    "/production/runs",
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
-}
-
-export async function listFinishedStockMovements() {
-  return request<{ movements: FinishedMovementRecord[] }>(
-    "/production/stock/finished/movements?limit=200",
-  );
-}
-
-export async function receiveFinishedStock(input: {
-  productId: string;
-  quantityPacks: number;
-  date: string;
-  reason: string;
-  reference?: string;
-  idempotencyKey: string;
-}) {
-  return request<{ balancePacks: number; movement: FinishedMovementRecord }>(
-    "/production/stock/finished/receipts",
-    {
-      method: "POST",
-      body: JSON.stringify(input),
-    },
-  );
-}
-
-export async function adjustFinishedStock(input: {
-  productId: string;
-  direction: "in" | "out";
-  quantityPacks: number;
-  date: string;
-  reason: string;
-  reference?: string;
-  idempotencyKey: string;
-}) {
-  return request<{ balancePacks: number; movement: FinishedMovementRecord }>(
-    "/production/stock/finished/adjustments",
-    {
-      method: "POST",
       body: JSON.stringify(input),
     },
   );
@@ -2319,20 +2003,17 @@ function normalizeOrderApi(order: OrderApiRecord): Order {
       quantity: item.packs,
       unitPrice: item.pricePerPack,
       lineTotal: item.lineTotal,
-      productId: item.productId || undefined,
       variantId: item.variantId || undefined,
       productCode: item.productCode,
       sku: item.sku || undefined,
-      packType: item.packType || undefined,
       saleUnit: item.saleUnit || undefined,
-      piecesPerPack: item.piecesPerPack || undefined,
       unitsPerSaleUnit: item.unitsPerSaleUnit || undefined,
       overrideReason: item.overrideReason || undefined,
     })),
     total: order.total,
     requestedDate: order.requestedDate,
     promisedDate: order.promisedDate || undefined,
-    fulfillmentMode: order.fulfillmentMode || "legacy_stock",
+    fulfillmentMode: order.fulfillmentMode || "bakery_stock",
     fulfilmentMethod: order.fulfilmentMethod,
     destination: order.destination,
     paymentTerms: order.paymentTerms,
@@ -2347,7 +2028,6 @@ function normalizeOrderApi(order: OrderApiRecord): Order {
     paidAmount: order.paidAmount,
     reserved: order.reserved,
     saleId: order.saleId || undefined,
-    legacyImported: order.legacyImported,
   };
 }
 
@@ -2433,7 +2113,21 @@ export async function listOrders() {
 
 export async function listBakeryOrderCatalog() {
   const result = await request<{ products: BakeryOrderCatalogItem[] }>("/orders/bakery-catalog");
-  if (!Array.isArray(result.products)) {
+  if (!Array.isArray(result.products) || result.products.some((product) =>
+    !product ||
+    typeof product.id !== "string" ||
+    typeof product.familyId !== "string" ||
+    typeof product.familyName !== "string" ||
+    typeof product.sku !== "string" ||
+    typeof product.name !== "string" ||
+    typeof product.saleUnit !== "string" ||
+    !Number.isSafeInteger(product.unitsPerSaleUnit) ||
+    product.unitsPerSaleUnit < 1 ||
+    !Number.isSafeInteger(product.price) ||
+    product.price < 1 ||
+    !Number.isSafeInteger(product.availableQuantity) ||
+    product.availableQuantity < 0
+  )) {
     throw new Error("The bakery order catalog response is invalid.");
   }
   return result.products;
@@ -2479,13 +2173,10 @@ export async function listBakeryPreorderDemand() {
       quantity: item.packs,
       unitPrice: item.pricePerPack,
       lineTotal: item.lineTotal,
-      productId: item.productId || undefined,
       variantId: item.variantId || undefined,
       productCode: item.productCode,
       sku: item.sku || undefined,
-      packType: item.packType || undefined,
       saleUnit: item.saleUnit || undefined,
-      piecesPerPack: item.piecesPerPack || undefined,
       unitsPerSaleUnit: item.unitsPerSaleUnit || undefined,
       overrideReason: item.overrideReason || undefined,
       reservedQuantity: item.reservedQuantity || 0,
@@ -2622,51 +2313,6 @@ export async function restoreOrder(id: string) {
     },
   );
   return normalizeOrderApi(result.order);
-}
-
-export async function importLegacyOrders(orders: Order[]) {
-  const imported: string[] = [];
-  const duplicates: string[] = [];
-  const rejected: { id: string; reason: string }[] = [];
-  for (let start = 0; start < orders.length; start += 200) {
-    const result = await request<{
-      imported: string[];
-      duplicates: string[];
-      rejected: typeof rejected;
-    }>("/orders/legacy-import", {
-      method: "POST",
-      body: JSON.stringify({
-        orders: orders.slice(start, start + 200).map((order) => ({
-          id: order.id,
-          reference: order.reference,
-          date: order.date,
-          customer: order.customer,
-          customerId: order.customerId,
-          items: order.items.map((item) => ({
-            product: item.product,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            lineTotal: item.lineTotal,
-          })),
-          total: order.total,
-          requestedDate: order.requestedDate,
-          fulfilmentMethod: order.fulfilmentMethod,
-          destination: order.destination,
-          paymentTerms: order.paymentTerms,
-          status: order.status,
-          completedAt: order.completedAt,
-          priority: order.priority,
-          priorityReason: order.priorityReason,
-          archivedAt: order.archivedAt,
-          notes: order.notes,
-        })),
-      }),
-    });
-    imported.push(...result.imported);
-    duplicates.push(...result.duplicates);
-    rejected.push(...result.rejected);
-  }
-  return { imported, duplicates, rejected };
 }
 
 export async function importLegacyCustomers(customers: Customer[]) {
@@ -4370,33 +4016,6 @@ export function updateLoginProtectionSettings(
   );
 }
 
-export type SalesBonusSettings = {
-  enabled: boolean;
-  standard: {
-    minimumQuantity: number;
-    maximumQuantity: number;
-    qualifyingQuantity: number;
-    bonusQuantity: number;
-  };
-  volume: {
-    minimumQuantity: number;
-    qualifyingQuantity: number;
-    bonusQuantity: number;
-  };
-  version: number;
-  updatedAt: string | null;
-};
-
-export function getSalesBonusSettings() {
-  return request<{ salesBonus: SalesBonusSettings }>("/sales-bonus-settings");
-}
-
-export function updateSalesBonusSettings(settings: SalesBonusSettings) {
-  return request<{ salesBonus: SalesBonusSettings }>("/sales-bonus-settings", {
-    method: "PUT",
-    body: JSON.stringify(settings),
-  });
-}
 
 export function listAuditEvents(filters: AuditFilters = {}) {
   const { targetUserId, ...query } = filters;
@@ -4478,4 +4097,246 @@ export function resetUserPassword(id: string) {
     expiresAt: string;
     message: string;
   }>(`/users/${encodeURIComponent(id)}/reset-password`, { method: "POST" });
+}
+
+export type WebsiteConversationStatus =
+  | "new"
+  | "in_progress"
+  | "awaiting_customer"
+  | "quoted"
+  | "converted_to_order"
+  | "closed";
+export type WebsiteConversation = {
+  id?: string;
+  _id: string;
+  reference: string;
+  type: "contact" | "custom_order" | "sales";
+  channel: "website_contact" | "website_custom_order" | "email";
+  status: WebsiteConversationStatus;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  subject: string;
+  recipientAddress: string;
+  customOrder: null | {
+    orderType: string;
+    requestedProducts: string;
+    estimatedQuantity: number | null;
+    preferredDate: string;
+    fulfillment: string;
+    requirements: string;
+  };
+  assignedTo: null | { _id?: string; id?: string; name: string; email: string };
+  lastMessageAt: string;
+  lastMessagePreview: string;
+  unread: boolean;
+  messages?: Array<{
+    _id: string;
+    direction: "inbound" | "outbound" | "internal";
+    channel: "form" | "email";
+    from: string;
+    to: string;
+    subject: string;
+    text: string;
+    senderUserId?: string;
+    deliveryStatus: "not_applicable" | "pending" | "sent" | "failed";
+    deliveryError: string;
+    sentAt?: string | null;
+    createdAt: string;
+  }>;
+};
+export type NewsletterSubscriber = {
+  id?: string;
+  _id: string;
+  email: string;
+  status: "pending_verification" | "active" | "unsubscribed" | "suspended" | "suppressed";
+  consent: {
+    source: string;
+    wordingVersion: string;
+    consentedAt: string;
+    verifiedAt: string | null;
+  };
+  providerSyncStatus: "pending" | "synced" | "failed" | "not_required";
+  providerSyncError: string;
+  lastCampaignAt: string | null;
+  createdAt: string;
+  suspendedAt: string | null;
+};
+export type NewsletterCampaignBlock =
+  | { type: "heading" | "paragraph"; text: string }
+  | { type: "button"; label: string; url: string }
+  | { type: "image"; url: string; alt: string };
+export type NewsletterCampaign = {
+  id?: string;
+  _id: string;
+  name: string;
+  subject: string;
+  previewText: string;
+  intro: string;
+  blocks: NewsletterCampaignBlock[];
+  status: "draft" | "sending" | "sent" | "failed";
+  audienceCount: number;
+  sentAt: string | null;
+  failureReason: string;
+  createdAt: string;
+  updatedAt: string;
+};
+export type CommunicationsListFilters = {
+  page?: number;
+  limit?: number;
+  status?: string;
+  type?: string;
+  search?: string;
+  unread?: boolean;
+  assignedTo?: "me";
+};
+
+function communicationsQuery(filters: Record<string, string | number | boolean | undefined>) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined && value !== "") params.set(key, String(value));
+  }
+  return params.size ? `?${params.toString()}` : "";
+}
+
+export function getWebsiteCommunicationSummary() {
+  return request<{
+    messages: { new: number; open: number; unread: number };
+  }>("/website-communications/summary");
+}
+
+export function listWebsiteConversations(filters: CommunicationsListFilters = {}) {
+  const query = communicationsQuery({
+    page: filters.page,
+    limit: filters.limit,
+    status: filters.status,
+    type: filters.type,
+    search: filters.search,
+    unread: filters.unread,
+    assignedTo: filters.assignedTo,
+  });
+  return request<{
+    items: WebsiteConversation[];
+    page: number;
+    limit: number;
+    total: number;
+  }>(`/website-communications/messages${query}`);
+}
+
+export function listMessageAssignees() {
+  return request<{ items: Array<{ _id: string; name: string; email: string; roles: UserRole[] }> }>(
+    "/website-communications/messages/assignees",
+  );
+}
+
+export function getWebsiteConversation(id: string) {
+  return request<{ conversation: WebsiteConversation }>(
+    `/website-communications/messages/${encodeURIComponent(id)}`,
+  );
+}
+
+export function updateWebsiteConversation(
+  id: string,
+  input: { status?: WebsiteConversationStatus; assignedTo?: string | null; unread?: boolean },
+) {
+  return request<{ conversation: WebsiteConversation }>(
+    `/website-communications/messages/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+}
+
+export function addWebsiteConversationNote(id: string, text: string) {
+  return request<{ conversation: WebsiteConversation }>(
+    `/website-communications/messages/${encodeURIComponent(id)}/notes`,
+    { method: "POST", body: JSON.stringify({ text }) },
+  );
+}
+
+export function sendWebsiteConversationReply(id: string, text: string) {
+  return request<{ conversation: WebsiteConversation }>(
+    `/website-communications/messages/${encodeURIComponent(id)}/replies`,
+    { method: "POST", body: JSON.stringify({ text }) },
+  );
+}
+
+export function retryWebsiteConversationReply(id: string, messageId: string) {
+  return request<{ conversation: WebsiteConversation }>(
+    `/website-communications/messages/${encodeURIComponent(id)}/replies/${encodeURIComponent(messageId)}/retry`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
+}
+
+export function listNewsletterSubscribers(filters: CommunicationsListFilters = {}) {
+  const query = communicationsQuery({
+    page: filters.page,
+    limit: filters.limit,
+    status: filters.status,
+    search: filters.search,
+  });
+  return request<{
+    items: NewsletterSubscriber[];
+    page: number;
+    limit: number;
+    total: number;
+    eligibleCount: number;
+  }>(`/website-communications/newsletter/subscribers${query}`);
+}
+
+export function updateNewsletterSubscriberStatus(
+  id: string,
+  status: "active" | "suspended" | "unsubscribed",
+  reason?: string,
+) {
+  return request<{ subscriber: NewsletterSubscriber }>(
+    `/website-communications/newsletter/subscribers/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify({ status, reason }) },
+  );
+}
+
+export function deleteNewsletterSubscriber(id: string, confirmEmail: string) {
+  return request<void>(
+    `/website-communications/newsletter/subscribers/${encodeURIComponent(id)}`,
+    { method: "DELETE", body: JSON.stringify({ confirmEmail }) },
+  );
+}
+
+export function listNewsletterCampaigns() {
+  return request<{ items: NewsletterCampaign[] }>("/website-communications/newsletter/campaigns");
+}
+
+export function createNewsletterCampaign(input: Omit<NewsletterCampaign, "id" | "_id" | "status" | "audienceCount" | "sentAt" | "failureReason" | "createdAt" | "updatedAt">) {
+  return request<{ campaign: NewsletterCampaign }>(
+    "/website-communications/newsletter/campaigns",
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+export function updateNewsletterCampaign(
+  id: string,
+  input: Omit<NewsletterCampaign, "id" | "_id" | "status" | "audienceCount" | "sentAt" | "failureReason" | "createdAt" | "updatedAt">,
+) {
+  return request<{ campaign: NewsletterCampaign }>(
+    `/website-communications/newsletter/campaigns/${encodeURIComponent(id)}`,
+    { method: "PUT", body: JSON.stringify(input) },
+  );
+}
+
+export function previewNewsletterCampaign(id: string) {
+  return request<{ html: string; text: string }>(
+    `/website-communications/newsletter/campaigns/${encodeURIComponent(id)}/preview`,
+  );
+}
+
+export function sendNewsletterCampaignTest(id: string, email: string) {
+  return request<{ sent: boolean; emailId: string }>(
+    `/website-communications/newsletter/campaigns/${encodeURIComponent(id)}/test`,
+    { method: "POST", body: JSON.stringify({ email }) },
+  );
+}
+
+export function sendNewsletterCampaign(id: string) {
+  return request<{ campaign: NewsletterCampaign }>(
+    `/website-communications/newsletter/campaigns/${encodeURIComponent(id)}/send`,
+    { method: "POST", body: JSON.stringify({}) },
+  );
 }

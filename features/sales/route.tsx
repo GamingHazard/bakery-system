@@ -12,7 +12,6 @@ export function SalesRoute({ mode }: { mode: "sales" | "credit" }) {
     salesCanRead,
     salesLoaded,
     salesLoadError,
-    salesMigrationWarning,
     retrySales,
     customersApiLoaded,
     retryCustomers,
@@ -40,7 +39,6 @@ export function SalesRoute({ mode }: { mode: "sales" | "credit" }) {
       salesError={salesLoadError}
       onRetrySales={retrySales}
       onSaleUpdated={updateSale}
-      salesWarning={salesMigrationWarning}
       customersAvailable={customersApiLoaded}
       onRetryCustomers={retryCustomers}
       companyName={companyName}

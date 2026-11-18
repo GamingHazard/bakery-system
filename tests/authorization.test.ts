@@ -34,6 +34,15 @@ describe("role-based section access", () => {
     expect(canAccessSection(["Super Admin"], "User Management")).toBe(true);
   });
 
+  it("grants the communications workspace only to the approved operating roles", () => {
+    for (const role of ["Admin", "General Manager", "Sales Manager", "Marketing Manager"] as const) {
+      expect(canAccessSection([role], "Website Communications")).toBe(true);
+    }
+    expect(canAccessSection(["Super Admin"], "Website Communications")).toBe(true);
+    expect(canAccessSection(["Accountant"], "Website Communications")).toBe(false);
+    expect(canAccessSection(["Production Manager"], "Website Communications")).toBe(false);
+  });
+
   it("applies the settings role matrix to every settings page", () => {
     expect(canAccessSection(["Human Resource"], "User Management")).toBe(true);
     expect(canAccessSection(["Human Resource"], "Company Profile Management")).toBe(false);

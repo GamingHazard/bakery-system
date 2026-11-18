@@ -20,12 +20,10 @@ import {
   sectionForPath,
 } from "@/lib/app-routes";
 import { importLegacyCustomersOnce } from "@/lib/customer-migration";
-import { importLegacySalesOnce } from "@/lib/sales-migration";
 import {
   clearState,
   createInvoiceSellerSnapshot,
   getSavedCustomersForImport,
-  getSavedSalesForImport,
   linkCustomerTransactions,
   loadState,
   navGroups,
@@ -40,7 +38,6 @@ import {
   ActiveSession,
   ApiError,
   importLegacyCustomers,
-  importLegacySales,
   listCustomers,
   listEmployees,
   getCompanyProfile,
@@ -165,7 +162,6 @@ export default function AppClient({ children }: { children: React.ReactNode }) {
   const [customerLoadAttempt, setCustomerLoadAttempt] = useState(0);
   const [salesLoaded, setSalesLoaded] = useState(false);
   const [salesLoadError, setSalesLoadError] = useState("");
-  const [salesMigrationWarning, setSalesMigrationWarning] = useState("");
   const [salesLoadAttempt, setSalesLoadAttempt] = useState(0);
   const salesCanRead = Boolean(
     currentUser &&
@@ -365,24 +361,12 @@ export default function AppClient({ children }: { children: React.ReactNode }) {
     if (!currentUser || currentUser.mustChangePassword || !salesCanRead) {
       setSalesLoaded(false);
       setSalesLoadError("");
-      setSalesMigrationWarning("");
       return;
     }
     let mounted = true;
     setSalesLoaded(false);
     setSalesLoadError("");
     const loadSales = async () => {
-      let migrationWarning = "";
-      try {
-        migrationWarning = await importLegacySalesOnce(
-          salesCanRead,
-          getSavedSalesForImport(),
-          importLegacySales,
-        );
-      } catch (error) {
-        migrationWarning = `Sales import did not complete: ${error instanceof Error ? error.message : "Unknown error."} Local data was retained.`;
-      }
-      if (mounted) setSalesMigrationWarning(migrationWarning);
       try {
         const { sales, payments } = await listSales();
         if (!mounted) return;
@@ -690,7 +674,6 @@ export default function AppClient({ children }: { children: React.ReactNode }) {
     customerCanArchive,
     salesLoaded,
     salesLoadError,
-    salesMigrationWarning,
     retrySales: () => setSalesLoadAttempt((attempt) => attempt + 1),
     salesCanRead,
     canReadAssets: assetCanRead,

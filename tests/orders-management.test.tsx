@@ -2,13 +2,11 @@ import { cleanup, render, screen, waitFor, fireEvent, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import OrdersManagement from '@/components/orders-management'
 import { cloneSeed, money, type Order } from '@/lib/erp'
-import { ORDER_IMPORT_MARKER_KEY } from '@/lib/order-migration'
 import type { OrderPaymentRecord, UserAccount } from '@/lib/user-api'
 
 const ordersApi = vi.hoisted(() => ({
   listOrders: vi.fn(),
   getOrderDetails: vi.fn(),
-  listProductionProducts: vi.fn(),
   listBakeryOrderCatalog: vi.fn(),
   listBakeryPreorderDemand: vi.fn(),
   confirmOrder: vi.fn(),
@@ -26,7 +24,6 @@ vi.mock('@/lib/user-api', () => ({
   listOrders: ordersApi.listOrders,
   listBakeryOrderCatalog: ordersApi.listBakeryOrderCatalog,
   listBakeryPreorderDemand: ordersApi.listBakeryPreorderDemand,
-  listProductionProducts: ordersApi.listProductionProducts,
   recordOrderPayment: vi.fn(),
   restoreOrder: vi.fn(),
   updateOrder: vi.fn(),
@@ -50,7 +47,7 @@ function createOrderRecord(id: string, status: Order['status'], total: number, o
     createdAt: '2026-10-23T10:00:00.000Z',
     customer: 'Saved Customer',
     customerId: 'C-100',
-    items: [{ id: `${id}-line`, product: 'Mango juice', quantity: 2, unitPrice: total / 2, lineTotal: total }],
+    items: [{ id: `${id}-line`, product: 'Sourdough loaf', variantId: 'variant-1', quantity: 2, unitPrice: total / 2, lineTotal: total, saleUnit: 'loaf', unitsPerSaleUnit: 1 }],
     total,
     requestedDate: '2026-10-24',
     fulfilmentMethod: 'Delivery',
@@ -99,8 +96,6 @@ function renderOrdersForUser(currentUser: UserAccount) {
 describe('orders-management', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    localStorage.setItem(ORDER_IMPORT_MARKER_KEY, 'complete')
-    ordersApi.listProductionProducts.mockResolvedValue({ products: [] })
     ordersApi.listBakeryOrderCatalog.mockResolvedValue([])
     ordersApi.listBakeryPreorderDemand.mockResolvedValue([])
     ordersApi.confirmOrder.mockImplementation(async (id: string, promisedDate?: string) => ({
@@ -132,7 +127,6 @@ describe('orders-management', () => {
     createOrderRecord('READY-1', 'Ready', 80000),
     createOrderRecord('COMPLETE-1', 'Completed', 100000),
     createOrderRecord('CANCELLED-1', 'Cancelled', 20000),
-    createOrderRecord('LEGACY-PENDING-1', 'Pending', 90000, { legacyImported: true }),
   ]
 
   it('summarizes KPI cards from the orders loaded through the server API', async () => {
@@ -140,7 +134,6 @@ describe('orders-management', () => {
     renderOrders()
 
     await waitFor(() => expect(screen.getByText('Order history')).toBeTruthy())
-    expect(screen.getByText('Based on 6 orders loaded from the server')).toBeTruthy()
     const summary = screen.getByLabelText('Order summary from backend')
     expect(within(summary).getByText('Total orders')).toBeTruthy()
     expect(within(summary).getByText('Pending confirmation')).toBeTruthy()

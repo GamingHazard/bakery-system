@@ -17,6 +17,7 @@ describe("app route mapping", () => {
       expect(sectionForPath(path!)).toBe(item.label);
     }
     expect(pathForSection("Dashboard")).toBe("/dashboard");
+    expect(pathForSection("Website Communications")).toBe("/website-communications");
     expect(pathForSection("Credit Sales")).toBe("/credit-sales");
     expect(pathForSection("Raw Material Management")).toBe(
       "/inventory/materials",

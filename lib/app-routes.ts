@@ -1,5 +1,6 @@
 const routesBySection: Record<string, string> = {
   Dashboard: "/dashboard",
+  "Website Communications": "/website-communications",
   Approvals: "/approvals",
   Auditing: "/auditing",
   Analysis: "/analysis",

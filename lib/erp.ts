@@ -1,10 +1,6 @@
 import {
   CUSTOMER_IMPORT_MARKER_KEY,
   CUSTOMER_IMPORT_SNAPSHOT_KEY,
-  ORDER_IMPORT_MARKER_KEY,
-  ORDER_IMPORT_SNAPSHOT_KEY,
-  SALES_IMPORT_MARKER_KEY,
-  SALES_IMPORT_SNAPSHOT_KEY,
 } from "./workspace-storage-keys";
 
 export type Status =
@@ -17,18 +13,13 @@ export type Status =
   | "Inactive";
 
 export type SaleLine = {
-  productId?: string;
   variantId?: string;
   productCode: string;
   sku?: string;
   productName: string;
-  packType?: "Box" | "Carton" | null;
   saleUnit?: string;
-  piecesPerPack?: number | null;
   unitsPerSaleUnit?: number | null;
   packs: number;
-  bonusPacks?: number;
-  totalStockPacks?: number;
   quantityPieces: number;
   catalogPricePerPack: number;
   pricePerPack: number;
@@ -50,14 +41,6 @@ export type SaleCompanySnapshot = {
   address?: string;
   logoUrl?: string;
 };
-export type SaleBonusSnapshot = {
-  enabled: boolean;
-  settingsVersion: number;
-  qualifyingBoxes: number;
-  bonusBoxes: number;
-  tier: "standard" | "volume" | "";
-  calculatedAt?: string;
-};
 export type Sale = {
   id: string;
   date: string;
@@ -77,13 +60,10 @@ export type Sale = {
   reference: string;
   receiptNumber?: string;
   lines?: SaleLine[];
-  bonusSnapshot?: SaleBonusSnapshot;
-  bonusDisabledReason?: string;
   customerSnapshot?: SalePartySnapshot;
   companySnapshot?: SaleCompanySnapshot;
   paidAmount?: number;
   payments?: SalePayment[];
-  legacyImported?: boolean;
 };
 export type SalePayment = {
   id: string;
@@ -127,8 +107,6 @@ export type ManagedReceipt = {
   isFavorite: boolean;
   isArchived: boolean;
   archivedAt?: string | null;
-  bonusSnapshot?: SaleBonusSnapshot;
-  bonusDisabledReason?: string;
 };
 export type ReceiptStats = {
   count: number;
@@ -205,13 +183,10 @@ export type OrderItem = {
   quantity: number;
   unitPrice: number;
   lineTotal: number;
-  productId?: string;
   productCode?: string;
-  packType?: "Box" | "Carton";
   variantId?: string;
   sku?: string;
   saleUnit?: string;
-  piecesPerPack?: number;
   unitsPerSaleUnit?: number;
   reservedQuantity?: number;
   outstandingQuantity?: number;
@@ -236,7 +211,7 @@ export type Order = {
   total: number;
   requestedDate: string;
   promisedDate?: string;
-  fulfillmentMode?: "legacy_stock" | "bakery_stock" | "preorder";
+  fulfillmentMode?: "bakery_stock" | "preorder";
   fulfilmentMethod: "Delivery" | "Pickup";
   destination: string;
   paymentTerms: "Paid now" | "Same-day" | "Credit";
@@ -251,7 +226,6 @@ export type Order = {
   paidAmount?: number;
   reserved?: boolean;
   saleId?: string;
-  legacyImported?: boolean;
 };
 export type EmployeeCategory =
   | "Staff employee"
@@ -637,83 +611,6 @@ export type RawMaterial = {
   cost: number;
   location: string;
 };
-export type RecipeIngredient = { materialId: string; quantityPerTank: number };
-export type ProductionRecipe = {
-  id: string;
-  productName: string;
-  tankUnit: string;
-  ingredients: RecipeIngredient[];
-  createdAt: string;
-  updatedAt: string;
-};
-export type ProductionRunLine = {
-  materialId: string;
-  materialName: string;
-  quantityPerTank: number;
-  totalQuantity: number;
-  unit: string;
-};
-export type ProductionRun = {
-  id: string;
-  reference: string;
-  recipeId: string;
-  productId?: string;
-  productName: string;
-  productUnit?: string;
-  productionDate: string;
-  tankCount: number;
-  producedQuantity?: number;
-  openingStock?: number;
-  salesQuantity?: number;
-  damagedQuantity?: number;
-  closingStock?: number;
-  damageReason?: string;
-  salesSource: "Manual";
-  location: string;
-  lines: ProductionRunLine[];
-  recordedAt: string;
-  actor: string;
-};
-export type FinishedProduct = {
-  id: string;
-  code: string;
-  name: string;
-  category: string;
-  unit: string;
-  flavour?: "Mango" | "Pineapple milk";
-  packType?: "Box" | "Carton";
-  piecesPerPack?: number;
-  packWeightKg?: number;
-  price?: number;
-  recipeId?: string;
-  recipeRequired: boolean;
-  active: boolean;
-  createdAt: string;
-  updatedAt: string;
-};
-export type FinishedStockMovementType =
-  | "Opening balance"
-  | "Production"
-  | "Sales dispatch"
-  | "Damage/write-off"
-  | "Internal use/sample"
-  | "Transfer in"
-  | "Transfer out"
-  | "Other stock in"
-  | "Adjustment increase"
-  | "Adjustment decrease";
-export type FinishedStockMovement = {
-  id: string;
-  reference: string;
-  productId: string;
-  type: FinishedStockMovementType;
-  quantity: number;
-  date: string;
-  recordedAt: string;
-  reason?: string;
-  note?: string;
-  actor: string;
-};
 export type AssetCategory =
   | "Office assets"
   | "Vehicles"
@@ -863,10 +760,6 @@ export type ErpState = {
   customers: Customer[];
   materials: RawMaterial[];
   stockMovements: StockMovement[];
-  productionRecipes: ProductionRecipe[];
-  productionRuns: ProductionRun[];
-  finishedProducts: FinishedProduct[];
-  finishedStockMovements: FinishedStockMovement[];
   assets: CompanyAsset[];
   assetEvents: AssetEvent[];
   companyProfile: CompanyProfile;
@@ -951,7 +844,7 @@ export const createInvoiceDraft = (
   const lines = sale.lines?.length
     ? sale.lines.map((line, index) => ({
         id: `${sale.id}-LINE-${index + 1}`,
-        description: `${line.productName} · ${line.packs} ${(line.saleUnit || line.packType || "unit").toLowerCase()}${line.packs === 1 ? "" : "s"}`,
+        description: `${line.productName} · ${line.packs} ${(line.saleUnit || "unit").toLowerCase()}${line.packs === 1 ? "" : "s"}`,
         quantity: line.packs,
         unitPrice: line.pricePerPack,
         lineTotal: line.lineTotal,
@@ -1039,10 +932,6 @@ export const seedState: ErpState = {
   customers: [],
   materials: [],
   stockMovements: [],
-  productionRecipes: [],
-  productionRuns: [],
-  finishedProducts: [],
-  finishedStockMovements: [],
   assets: [],
   assetEvents: [],
   activities: [],
@@ -1076,15 +965,6 @@ export const formatDate = (date: string) =>
     month: "short",
     year: "numeric",
   }).format(new Date(date));
-export const packUnitLabel = (packType?: string | null, quantity?: number) => {
-  const singular =
-    packType === "Box" ? "box" : packType === "Carton" ? "carton" : "pack";
-  return quantity === 1
-    ? singular
-    : singular === "box"
-      ? "boxes"
-      : `${singular}s`;
-};
 export const sum = (items: number[]) =>
   items.reduce((total, value) => total + value, 0);
 export const paidAmountForSale = (saleId: string, payments: SalePayment[]) =>
@@ -1350,218 +1230,6 @@ const normalizeStockMovements = (value: unknown): StockMovement[] => {
     );
 };
 
-const normalizeProductionRecipes = (value: unknown): ProductionRecipe[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is Record<string, unknown> =>
-      Boolean(item && typeof item === "object"),
-    )
-    .map((recipe, index) => {
-      const ingredients: RecipeIngredient[] = Array.isArray(recipe.ingredients)
-        ? recipe.ingredients
-            .filter((item): item is Record<string, unknown> =>
-              Boolean(item && typeof item === "object"),
-            )
-            .map((item) => ({
-              materialId: String(item.materialId || ""),
-              quantityPerTank: Number(item.quantityPerTank),
-            }))
-            .filter(
-              (item) =>
-                item.materialId &&
-                Number.isFinite(item.quantityPerTank) &&
-                item.quantityPerTank > 0,
-            )
-        : [];
-      const createdAt =
-        typeof recipe.createdAt === "string"
-          ? recipe.createdAt
-          : new Date().toISOString();
-      return {
-        id: String(recipe.id || `RECIPE-${index + 1}`),
-        productName: String(recipe.productName || ""),
-        tankUnit: String(recipe.tankUnit || "tank"),
-        ingredients,
-        createdAt,
-        updatedAt:
-          typeof recipe.updatedAt === "string" ? recipe.updatedAt : createdAt,
-      };
-    })
-    .filter((recipe) => recipe.productName && recipe.ingredients.length > 0);
-};
-
-const normalizeProductionRuns = (value: unknown): ProductionRun[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is Record<string, unknown> =>
-      Boolean(item && typeof item === "object"),
-    )
-    .map((run, index) => {
-      const lines: ProductionRunLine[] = Array.isArray(run.lines)
-        ? run.lines
-            .filter((item): item is Record<string, unknown> =>
-              Boolean(item && typeof item === "object"),
-            )
-            .map((item) => ({
-              materialId: String(item.materialId || ""),
-              materialName: String(item.materialName || ""),
-              quantityPerTank: Math.max(0, Number(item.quantityPerTank) || 0),
-              totalQuantity: Math.max(0, Number(item.totalQuantity) || 0),
-              unit: String(item.unit || ""),
-            }))
-            .filter(
-              (item) => item.materialId && item.totalQuantity > 0 && item.unit,
-            )
-        : [];
-      const productionDate = String(run.productionDate || "");
-      const recordedAt =
-        typeof run.recordedAt === "string"
-          ? run.recordedAt
-          : new Date().toISOString();
-      return {
-        id: String(run.id || `PROD-${index + 1}`),
-        reference: String(
-          run.reference || `PROD-${String(index + 1).padStart(5, "0")}`,
-        ),
-        recipeId: String(run.recipeId || ""),
-        productId:
-          typeof run.productId === "string" ? run.productId : undefined,
-        productName: String(run.productName || ""),
-        productUnit: String(run.productUnit || "unit"),
-        productionDate,
-        tankCount: Math.max(0, Number(run.tankCount) || 0),
-        producedQuantity: Number.isFinite(Number(run.producedQuantity))
-          ? Math.max(0, Number(run.producedQuantity))
-          : Math.max(0, Number(run.tankCount) || 0),
-        openingStock: Number.isFinite(Number(run.openingStock))
-          ? Math.max(0, Number(run.openingStock))
-          : undefined,
-        salesQuantity: Number.isFinite(Number(run.salesQuantity))
-          ? Math.max(0, Number(run.salesQuantity))
-          : undefined,
-        damagedQuantity: Number.isFinite(Number(run.damagedQuantity))
-          ? Math.max(0, Number(run.damagedQuantity))
-          : undefined,
-        closingStock: Number.isFinite(Number(run.closingStock))
-          ? Math.max(0, Number(run.closingStock))
-          : undefined,
-        damageReason:
-          typeof run.damageReason === "string" ? run.damageReason : undefined,
-        salesSource: "Manual" as const,
-        location: String(run.location || ""),
-        lines,
-        recordedAt,
-        actor: String(run.actor || "Administrator"),
-      };
-    })
-    .filter(
-      (run) =>
-        run.productName &&
-        /^\d{4}-\d{2}-\d{2}$/.test(run.productionDate) &&
-        run.tankCount > 0 &&
-        run.lines.length > 0,
-    );
-};
-
-const finishedMovementTypes: FinishedStockMovementType[] = [
-  "Opening balance",
-  "Production",
-  "Sales dispatch",
-  "Damage/write-off",
-  "Internal use/sample",
-  "Transfer in",
-  "Transfer out",
-  "Other stock in",
-  "Adjustment increase",
-  "Adjustment decrease",
-];
-
-const normalizeFinishedProducts = (value: unknown): FinishedProduct[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is Record<string, unknown> =>
-      Boolean(item && typeof item === "object"),
-    )
-    .map((product, index) => {
-      const createdAt =
-        typeof product.createdAt === "string"
-          ? product.createdAt
-          : new Date().toISOString();
-      return {
-        id: String(product.id || `FP-${index + 1}`),
-        code: String(
-          product.code || `PRODUCT-${String(index + 1).padStart(3, "0")}`,
-        ),
-        name: String(product.name || ""),
-        category: String(product.category || "Finished goods"),
-        unit: String(product.unit || "unit"),
-        flavour:
-          product.flavour === "Mango"
-            ? ("Mango" as const)
-            : product.flavour === "Pineapple milk"
-              ? ("Pineapple milk" as const)
-              : undefined,
-        packType: (product.packType === "Box"
-          ? "Box"
-          : product.packType === "Carton"
-            ? "Carton"
-            : undefined) as FinishedProduct["packType"],
-        piecesPerPack:
-          Number.isInteger(Number(product.piecesPerPack)) &&
-          Number(product.piecesPerPack) > 0
-            ? Number(product.piecesPerPack)
-            : undefined,
-        packWeightKg:
-          Number.isFinite(Number(product.packWeightKg)) &&
-          Number(product.packWeightKg) > 0
-            ? Number(product.packWeightKg)
-            : undefined,
-        recipeId:
-          typeof product.recipeId === "string" ? product.recipeId : undefined,
-        recipeRequired: Boolean(product.recipeRequired),
-        active: product.active !== false,
-        createdAt,
-        updatedAt:
-          typeof product.updatedAt === "string" ? product.updatedAt : createdAt,
-      };
-    })
-    .filter((product) => product.name);
-};
-
-const normalizeFinishedStockMovements = (
-  value: unknown,
-): FinishedStockMovement[] => {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((item): item is Record<string, unknown> =>
-      Boolean(item && typeof item === "object"),
-    )
-    .map((movement, index) => ({
-      id: String(movement.id || `FG-MOV-${index + 1}`),
-      reference: String(
-        movement.reference || `FG-${String(index + 1).padStart(5, "0")}`,
-      ),
-      productId: String(movement.productId || ""),
-      type: finishedMovementTypes.includes(
-        String(movement.type) as FinishedStockMovementType,
-      )
-        ? (movement.type as FinishedStockMovementType)
-        : "Adjustment increase",
-      quantity: Math.max(0, Number(movement.quantity) || 0),
-      date: /^\d{4}-\d{2}-\d{2}$/.test(String(movement.date || ""))
-        ? String(movement.date)
-        : new Date().toISOString().slice(0, 10),
-      recordedAt:
-        typeof movement.recordedAt === "string"
-          ? movement.recordedAt
-          : new Date().toISOString(),
-      reason: typeof movement.reason === "string" ? movement.reason : undefined,
-      note: typeof movement.note === "string" ? movement.note : undefined,
-      actor: String(movement.actor || "Administrator"),
-    }))
-    .filter((movement) => movement.productId && movement.quantity > 0);
-};
-
 const assetCategories: AssetCategory[] = [
   "Office assets",
   "Vehicles",
@@ -1741,135 +1409,6 @@ const normalizeAssetEvents = (value: unknown): AssetEvent[] => {
       nextServiceDate: optionalDate(event.nextServiceDate),
     }))
     .filter((event) => event.assetId);
-};
-
-const migrateFinishedProducts = (
-  recipes: ProductionRecipe[],
-  runs: ProductionRun[],
-): FinishedProduct[] => {
-  const names = new Map<string, { recipeId?: string; unit: string }>();
-  recipes.forEach((recipe) =>
-    names.set(recipe.productName.trim().toLowerCase(), {
-      recipeId: recipe.id,
-      unit: recipe.tankUnit || "unit",
-    }),
-  );
-  runs.forEach((run) => {
-    const key = run.productName.trim().toLowerCase();
-    if (!names.has(key))
-      names.set(key, {
-        recipeId: run.recipeId || undefined,
-        unit: run.productUnit || "unit",
-      });
-  });
-  const createdAt = new Date().toISOString();
-  return [...names.entries()].map(([key, value], index) => {
-    const name =
-      recipes.find((recipe) => recipe.productName.trim().toLowerCase() === key)
-        ?.productName ??
-      runs.find((run) => run.productName.trim().toLowerCase() === key)
-        ?.productName ??
-      key;
-    return {
-      id: `FG-MIG-${index + 1}`,
-      code: `LEGACY-${String(index + 1).padStart(3, "0")}`,
-      name,
-      category: "Finished goods",
-      unit: value.unit,
-      recipeId: value.recipeId,
-      recipeRequired: false,
-      active: true,
-      createdAt,
-      updatedAt: createdAt,
-    };
-  });
-};
-
-const migrateFinishedMovements = (
-  products: FinishedProduct[],
-  runs: ProductionRun[],
-): FinishedStockMovement[] => {
-  const productByName = new Map(
-    products.map((product) => [product.name.trim().toLowerCase(), product]),
-  );
-  const earliestRun = new Map<string, ProductionRun>();
-  runs.forEach((run) => {
-    const key = run.productName.trim().toLowerCase();
-    const current = earliestRun.get(key);
-    if (!current || run.productionDate < current.productionDate)
-      earliestRun.set(key, run);
-  });
-  return runs.flatMap((run) => {
-    const product = productByName.get(run.productName.trim().toLowerCase());
-    if (!product) return [];
-    const opening: FinishedStockMovement[] = [];
-    if (
-      run.openingStock !== undefined &&
-      earliestRun.get(run.productName.trim().toLowerCase())?.id === run.id &&
-      run.openingStock > 0
-    ) {
-      opening.push({
-        id: `FG-OPEN-${run.id}`,
-        reference: `OPEN-${run.reference}`,
-        productId: product.id,
-        type: "Opening balance",
-        quantity: run.openingStock,
-        date: run.productionDate,
-        recordedAt: run.recordedAt,
-        reason: "Opening balance migrated from daily production history",
-        actor: "System",
-      });
-    }
-    const runQuantity = run.producedQuantity ?? run.tankCount;
-    return [
-      ...opening,
-      ...(runQuantity > 0
-        ? [
-            {
-              id: `FG-PROD-${run.id}`,
-              reference: run.reference,
-              productId: product.id,
-              type: "Production" as const,
-              quantity: runQuantity,
-              date: run.productionDate,
-              recordedAt: run.recordedAt,
-              reason: "Migrated production output",
-              actor: run.actor,
-            },
-          ]
-        : []),
-      ...((run.salesQuantity ?? 0) > 0
-        ? [
-            {
-              id: `FG-SALES-${run.id}`,
-              reference: run.reference,
-              productId: product.id,
-              type: "Sales dispatch" as const,
-              quantity: run.salesQuantity!,
-              date: run.productionDate,
-              recordedAt: run.recordedAt,
-              reason: "Migrated daily sales quantity",
-              actor: run.actor,
-            },
-          ]
-        : []),
-      ...((run.damagedQuantity ?? 0) > 0
-        ? [
-            {
-              id: `FG-DAMAGE-${run.id}`,
-              reference: run.reference,
-              productId: product.id,
-              type: "Damage/write-off" as const,
-              quantity: run.damagedQuantity!,
-              date: run.productionDate,
-              recordedAt: run.recordedAt,
-              reason: run.damageReason || "Migrated daily damage quantity",
-              actor: run.actor,
-            },
-          ]
-        : []),
-    ];
-  });
 };
 
 const openingMovementsFor = (materials: RawMaterial[]): StockMovement[] =>
@@ -2308,16 +1847,6 @@ export const loadState = (): ErpState => {
     const stockMovements = Array.isArray(parsed.stockMovements)
       ? normalizeStockMovements(parsed.stockMovements)
       : openingMovementsFor(materials);
-    const productionRecipes = normalizeProductionRecipes(
-      parsed.productionRecipes,
-    );
-    const productionRuns = normalizeProductionRuns(parsed.productionRuns);
-    const finishedProducts = Array.isArray(parsed.finishedProducts)
-      ? normalizeFinishedProducts(parsed.finishedProducts)
-      : migrateFinishedProducts(productionRecipes, productionRuns);
-    const finishedStockMovements = Array.isArray(parsed.finishedStockMovements)
-      ? normalizeFinishedStockMovements(parsed.finishedStockMovements)
-      : migrateFinishedMovements(finishedProducts, productionRuns);
     const assets = normalizeAssets(parsed.assets);
     const assetEvents = normalizeAssetEvents(parsed.assetEvents);
     const companyProfile = normalizeCompanyProfile(parsed.companyProfile);
@@ -2343,10 +1872,6 @@ export const loadState = (): ErpState => {
       salaryAdvances,
       materials,
       stockMovements,
-      productionRecipes,
-      productionRuns,
-      finishedProducts,
-      finishedStockMovements,
       assets,
       assetEvents,
       companyProfile,
@@ -2402,8 +1927,6 @@ export const exportLegacyRawMaterialMigration = () => {
       ),
     })),
     stockMovements,
-    productionRecipes: normalizeProductionRecipes(parsed.productionRecipes),
-    productionRuns: normalizeProductionRuns(parsed.productionRuns),
   };
 };
 
@@ -3022,24 +2545,6 @@ export const getSavedCustomersForImport = (): Customer[] => {
   }
   return Array.isArray(parsed.customers) ? parsed.customers : [];
 };
-export const getSavedSalesForImport = (): {
-  sales: Sale[];
-  payments: SalePayment[];
-} => {
-  if (typeof window === "undefined") return { sales: [], payments: [] };
-  const saved = window.localStorage.getItem(STORAGE_KEY);
-  if (!saved) return { sales: [], payments: [] };
-  let parsed: Partial<ErpState>;
-  try {
-    parsed = JSON.parse(saved) as Partial<ErpState>;
-  } catch {
-    throw new Error("Saved browser data could not be read for sales import.");
-  }
-  return {
-    sales: Array.isArray(parsed.sales) ? parsed.sales : [],
-    payments: Array.isArray(parsed.payments) ? parsed.payments : [],
-  };
-};
 export const clearState = () => {
   if (typeof window === "undefined") return;
   const saved =
@@ -3057,31 +2562,6 @@ export const clearState = () => {
         window.localStorage.setItem(
           CUSTOMER_IMPORT_SNAPSHOT_KEY,
           JSON.stringify(parsed.customers),
-        );
-      }
-      if (
-        Array.isArray(parsed.sales) &&
-        parsed.sales.length &&
-        !window.localStorage.getItem(SALES_IMPORT_MARKER_KEY) &&
-        !window.localStorage.getItem(SALES_IMPORT_SNAPSHOT_KEY)
-      ) {
-        window.localStorage.setItem(
-          SALES_IMPORT_SNAPSHOT_KEY,
-          JSON.stringify({
-            sales: parsed.sales,
-            payments: Array.isArray(parsed.payments) ? parsed.payments : [],
-          }),
-        );
-      }
-      if (
-        Array.isArray(parsed.orders) &&
-        parsed.orders.length &&
-        !window.localStorage.getItem(ORDER_IMPORT_MARKER_KEY) &&
-        !window.localStorage.getItem(ORDER_IMPORT_SNAPSHOT_KEY)
-      ) {
-        window.localStorage.setItem(
-          ORDER_IMPORT_SNAPSHOT_KEY,
-          JSON.stringify(parsed.orders),
         );
       }
       preserveLegacyEmployeeData(saved);
@@ -3127,6 +2607,7 @@ export const navGroups = [
     label: "Overview",
     items: [
       { label: "Dashboard", icon: "LayoutDashboard" },
+      { label: "Website Communications", icon: "MessageSquareText" },
       { label: "Approvals", icon: "ClipboardCheck" },
       { label: "Auditing", icon: "ScrollText" },
       { label: "Analysis", icon: "ChartSpline" },

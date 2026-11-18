@@ -48,6 +48,11 @@ export function canAccessSection(roles: readonly UserRole[], section: string) {
   if (section === 'Employee Profile Details') section = 'Employee Profiles'
   if (section === 'Customer Details') section = 'Customer Management'
   if (roles.includes('Super Admin')) return true
+  if (section === 'Website Communications') {
+    return roles.some((role) =>
+      ['Admin', 'General Manager', 'Sales Manager', 'Marketing Manager'].includes(role),
+    )
+  }
   if (settingsSections.has(section)) {
     if (section === 'User Management') {
       return roles.some((role) => ['General Manager', 'Human Resource'].includes(role))

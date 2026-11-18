@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createSale, getCreditCustomerStatement, getCreditReminderSettings, importLegacySales, listNotifications, listSalesOwners, markAllNotificationsRead, markNotificationRead, updateCreditReminderSettings, updateCreditSale } from '@/lib/user-api'
+import { createSale, getCreditCustomerStatement, getCreditReminderSettings, listNotifications, listSalesOwners, markAllNotificationsRead, markNotificationRead, updateCreditReminderSettings, updateCreditSale } from '@/lib/user-api'
 import type { Sale, SalePayment } from '@/lib/erp'
 
 function jsonResponse(payload: unknown, status = 200): Response {
@@ -23,24 +23,25 @@ const saleResponse = {
   company: { name: 'Example Ltd', email: 'info@example.test' },
   date: '2026-10-23',
   lines: [{
-    productId: '507f1f77bcf86cd799439013',
-    productCode: 'J-1',
-    productName: 'Mango juice',
-    packType: 'Box' as const,
-    piecesPerPack: 12,
+    variantId: '507f1f77bcf86cd799439013',
+    productCode: 'SD-LOAF',
+    sku: 'SD-LOAF',
+    productName: 'Sourdough loaf',
+    saleUnit: 'loaf',
+    unitsPerSaleUnit: 1,
     packs: 2,
-    quantityPieces: 24,
-    catalogPricePerPack: 24000,
-    pricePerPack: 24000,
-    lineTotal: 48000,
+    quantityPieces: 2,
+    catalogPricePerPack: 12000,
+    pricePerPack: 12000,
+    lineTotal: 24000,
   }],
-  total: 48000,
-  paidAmount: 48000,
+  total: 24000,
+  paidAmount: 24000,
   paymentTerms: 'Paid now' as const,
   payments: [{
     id: 'PAY-1',
     saleId: 'SERVER-SALE',
-    amount: 48000,
+    amount: 24000,
     date: '2026-10-23',
     method: 'Cash' as const,
     createdAt: '2026-10-23T10:00:00.000Z',
@@ -54,9 +55,9 @@ describe('sales API client', () => {
     vi.stubGlobal('fetch', fetchMock)
     const input = {
       customerId: 'C-100',
-      lines: [{ productId: saleResponse.lines[0].productId, packs: 2 }],
+      lines: [{ variantId: saleResponse.lines[0].variantId, packs: 2 }],
       paymentTerms: 'Paid now' as const,
-      initialPaymentAmount: 48000,
+      initialPaymentAmount: 24000,
       initialPaymentMethod: 'Cash' as const,
       idempotencyKey: 'SALE-RETRY-1',
     }
@@ -65,9 +66,10 @@ describe('sales API client', () => {
     expect(result.sale.receiptNumber).toBe('SAL-2026-000001')
     expect(result.sale.createdByName).toBe('Sales Clerk')
     expect(result.sale.lines).toHaveLength(1)
-    expect(result.payments[0].amount).toBe(48000)
+    expect(result.payments[0].amount).toBe(24000)
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(String(init.body)).idempotencyKey).toBe('SALE-RETRY-1')
+    expect(JSON.parse(String(init.body)).lines).toEqual([{ variantId: saleResponse.lines[0].variantId, packs: 2 }])
 
     const missingReceipt = vi.fn().mockResolvedValue(jsonResponse({
       sale: { ...saleResponse, receiptNumber: '', reference: '' },
@@ -77,44 +79,6 @@ describe('sales API client', () => {
     await expect(createSale(input)).rejects.toMatchObject({ status: 502 })
   })
 
-  it('imports saved sales and payment history through the protected migration endpoint', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
-      imported: ['S-1'],
-      duplicates: [],
-      rejected: [],
-    }, 201))
-    vi.stubGlobal('fetch', fetchMock)
-    const sale: Sale = {
-      id: 'S-1',
-      reference: 'SAL-1048',
-      receiptNumber: 'SAL-1048',
-      date: '2026-10-23',
-      customer: 'Walk-in',
-      product: 'Mango juice',
-      quantity: 2,
-      total: 48000,
-      status: 'Paid',
-      method: 'Cash',
-    }
-    const payment: SalePayment = {
-      id: 'PAY-1',
-      saleId: sale.id,
-      amount: 48000,
-      date: sale.date,
-      method: 'Cash',
-      recordedAt: `${sale.date}T10:00:00.000Z`,
-    }
-
-    await expect(importLegacySales([sale], [payment])).resolves.toEqual({
-      imported: ['S-1'],
-      duplicates: [],
-      rejected: [],
-    })
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/sales/legacy-import'),
-      expect.objectContaining({ method: 'POST' }),
-    )
-  })
 
   it('loads and marks generalized notifications read', async () => {
     const notification = {

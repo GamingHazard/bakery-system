@@ -5,16 +5,12 @@ import {
 } from "@/lib/customer-migration";
 import {
   CUSTOMER_IMPORT_SNAPSHOT_KEY,
-  ORDER_IMPORT_MARKER_KEY,
-  ORDER_IMPORT_SNAPSHOT_KEY,
-  SALES_IMPORT_SNAPSHOT_KEY,
 } from "@/lib/workspace-storage-keys";
 import {
   clearState,
   markLegacyLeaveRequestsImported,
   preserveLegacyLeaveRequests,
 } from "@/lib/erp";
-import { importLegacyOrdersOnce } from "@/lib/order-migration";
 
 const customers = [
   {
@@ -78,9 +74,6 @@ describe("safe customer migration", () => {
       "lumina-erp-workspace-v1",
       JSON.stringify({
         customers,
-        sales: [{ id: "legacy-sale" }],
-        payments: [{ id: "legacy-payment" }],
-        orders: [{ id: "legacy-order" }],
         employees: [{ id: "legacy-employee", number: "EMP-777" }],
         attendanceRecords: [],
         salaryAdvances: [],
@@ -94,39 +87,6 @@ describe("safe customer migration", () => {
     expect(
       JSON.parse(localStorage.getItem(CUSTOMER_IMPORT_SNAPSHOT_KEY) || "[]"),
     ).toEqual(customers);
-    expect(
-      JSON.parse(localStorage.getItem(SALES_IMPORT_SNAPSHOT_KEY) || "{}"),
-    ).toEqual({
-      sales: [{ id: "legacy-sale" }],
-      payments: [{ id: "legacy-payment" }],
-    });
-    expect(
-      JSON.parse(localStorage.getItem(ORDER_IMPORT_SNAPSHOT_KEY) || "[]"),
-    ).toEqual([{ id: "legacy-order" }]);
-  });
-
-  it("can retry pending customer and order snapshots after workspace cache cleanup", async () => {
-    const savedCustomers = vi.fn().mockResolvedValue({ rejected: [] });
-    const savedOrders = vi
-      .fn()
-      .mockResolvedValue({ imported: [], duplicates: [], rejected: [] });
-    localStorage.setItem(
-      CUSTOMER_IMPORT_SNAPSHOT_KEY,
-      JSON.stringify(customers),
-    );
-    localStorage.setItem(
-      ORDER_IMPORT_SNAPSHOT_KEY,
-      JSON.stringify([{ id: "legacy-order" }]),
-    );
-
-    await importLegacyCustomersOnce(true, [], savedCustomers);
-    await importLegacyOrdersOnce(true, [], savedOrders);
-
-    expect(savedCustomers).toHaveBeenCalledWith(customers);
-    expect(savedOrders).toHaveBeenCalledWith([{ id: "legacy-order" }]);
-    expect(localStorage.getItem(CUSTOMER_IMPORT_SNAPSHOT_KEY)).toBeNull();
-    expect(localStorage.getItem(ORDER_IMPORT_SNAPSHOT_KEY)).toBeNull();
-    expect(localStorage.getItem(ORDER_IMPORT_MARKER_KEY)).toBe("complete");
   });
 
   it("does not recreate a completed leave snapshot and removes imported salary backups on clear", () => {

@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Download, Ellipsis, Eye, Plus, Printer, Search, X } from 'lucide-react'
-import { createId, exportCsv, formatDate, money, packUnitLabel, paidAmountForSale, paymentStateForSale, sum, type ErpState, type Sale, type SalePayment } from '@/lib/erp'
-import { ApiError, confirmOrder, createSale, getCreditCustomerStatement, getCreditReminderSettings, getSalesBonusSettings, listOrders, listProductionProducts, listSalesOwners, recordSalePayment, updateCreditReminderSettings, updateCreditSale, type UserAccount } from '@/lib/user-api'
+import { createId, exportCsv, formatDate, money, paidAmountForSale, paymentStateForSale, sum, type ErpState, type Sale, type SalePayment } from '@/lib/erp'
+import { ApiError, confirmOrder, createSale, getCreditCustomerStatement, getCreditReminderSettings, listBakeryOrderCatalog, listOrders, listSalesOwners, recordSalePayment, updateCreditReminderSettings, updateCreditSale, type UserAccount } from '@/lib/user-api'
 
 type Props = {
   mode: 'sales' | 'credit'
@@ -12,7 +12,6 @@ type Props = {
   currentUser: UserAccount
   salesLoading: boolean
   salesError: string
-  salesWarning: string
   onRetrySales: () => void
   onSaleUpdated: (sale: Sale, payments: SalePayment[]) => void
   companyName: string
@@ -21,7 +20,7 @@ type Props = {
   onRetryCustomers: () => void
 }
 
-type DraftLine = { key: string; productId: string; packs: string; price: string; reason: string }
+type DraftLine = { key: string; variantId: string; quantity: string; price: string; reason: string }
 type SalePaymentDraft = { amount: number; date: string; method: SalePayment['method']; txnID: string; note: string }
 type SalesPeriod = 'today' | 'week' | 'month'
 
@@ -45,7 +44,7 @@ const salesPeriodStart = (period: SalesPeriod, currentDate: string) => {
   date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7))
   return date.toISOString().slice(0, 10)
 }
-const productQueryKey = ['sales-products']
+const productQueryKey = ['bakery-sales-catalog']
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'The request could not be completed.'
@@ -70,22 +69,16 @@ function SaleReceipt({
   }
   const buyer = sale.customerSnapshot ?? { name: sale.customer }
   const payments = sale.payments ?? []
-  const lines = sale.lines?.length
-    ? sale.lines
-    : sale.legacyImported
-      ? []
-      : [{
-        productId: '',
-        productCode: '',
-        productName: sale.product,
-        packType: 'Box' as const,
-        piecesPerPack: 1,
-        packs: sale.quantity,
-        quantityPieces: sale.quantity,
-        catalogPricePerPack: sale.total / Math.max(1, sale.quantity),
-        pricePerPack: sale.total / Math.max(1, sale.quantity),
-        lineTotal: sale.total,
-      }]
+  const lines = sale.lines?.length ? sale.lines : [{
+    productCode: '',
+    productName: sale.product,
+    saleUnit: 'unit',
+    packs: sale.quantity,
+    quantityPieces: sale.quantity,
+    catalogPricePerPack: sale.total / Math.max(1, sale.quantity),
+    pricePerPack: sale.total / Math.max(1, sale.quantity),
+    lineTotal: sale.total,
+  }]
 
   const downloadPdf = async () => {
     setDownloading(true)
@@ -138,15 +131,15 @@ function SaleReceipt({
       y += buyer.phone ? 22 : 16
       pdf.setFont('helvetica', 'bold')
       pdf.text('Product', 14, y)
-      pdf.text('Packs', 120, y, { align: 'right' })
-      pdf.text('Price / pack', 158, y, { align: 'right' })
+      pdf.text('Quantity', 120, y, { align: 'right' })
+      pdf.text('Price / unit', 158, y, { align: 'right' })
       pdf.text('Amount', 196, y, { align: 'right' })
       y += 3
       pdf.line(14, y, 196, y)
       y += 7
       pdf.setFont('helvetica', 'normal')
       for (const line of lines) {
-        const label = `${line.productName} (${line.packType}${line.piecesPerPack ? ` · ${line.piecesPerPack} pcs` : ''})`
+        const label = `${line.productName} (${line.sku || line.productCode} · ${line.saleUnit || 'unit'})`
         const wrapped = pdf.splitTextToSize(label, 95) as string[]
         if (y + Math.max(6, wrapped.length * 4.5) + 2 > 275) {
           pdf.addPage()
@@ -161,13 +154,6 @@ function SaleReceipt({
         pdf.text(money(line.pricePerPack), 158, y, { align: 'right' })
         pdf.text(money(line.lineTotal), 196, y, { align: 'right' })
         y += Math.max(6, wrapped.length * 4.5) + 2
-      }
-      if (sale.legacyImported) {
-        pdf.text(`${sale.product} (legacy record)`, 14, y)
-        pdf.text(`${sale.quantity} units`, 120, y, { align: 'right' })
-        pdf.text('-', 158, y, { align: 'right' })
-        pdf.text(money(sale.total), 196, y, { align: 'right' })
-        y += 8
       }
       pdf.line(14, y, 196, y)
       y += 8
@@ -242,8 +228,8 @@ function SaleReceipt({
           </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[500px] text-left text-xs">
-              <thead><tr className="border-b border-slate-200 text-[10px] uppercase text-slate-400"><th className="py-2">Product</th><th className="py-2 text-right">Packs</th><th className="py-2 text-right">Price / pack</th><th className="py-2 text-right">Amount</th></tr></thead>
-              <tbody>{sale.legacyImported ? <tr className="border-b border-slate-100"><td className="py-2.5 font-medium">{sale.product}<span className="block text-[10px] text-slate-400">Imported historical record</span></td><td className="py-2.5 text-right">{sale.quantity} units</td><td className="py-2.5 text-right">—</td><td className="py-2.5 text-right font-semibold">{money(sale.total)}</td></tr> : lines.map((line, index) => <tr key={`${line.variantId || line.productId || line.productCode}-${index}`} className="border-b border-slate-100"><td className="py-2.5 font-medium">{line.productName}<span className="block text-[10px] text-slate-400">{line.saleUnit ? `${line.sku || line.productCode} · ${line.saleUnit}` : `${line.packType} · ${line.piecesPerPack} pieces/pack`}</span></td><td className="py-2.5 text-right">{line.packs}</td><td className="py-2.5 text-right">{money(line.pricePerPack)}</td><td className="py-2.5 text-right font-semibold">{money(line.lineTotal)}</td></tr>)}</tbody>
+              <thead><tr className="border-b border-slate-200 text-[10px] uppercase text-slate-400"><th className="py-2">Product</th><th className="py-2 text-right">Quantity</th><th className="py-2 text-right">Price / unit</th><th className="py-2 text-right">Amount</th></tr></thead>
+              <tbody>{lines.map((line, index) => <tr key={`${line.variantId || line.productCode}-${index}`} className="border-b border-slate-100"><td className="py-2.5 font-medium">{line.productName}<span className="block text-[10px] text-slate-400">{line.sku || line.productCode} · {line.saleUnit || 'unit'}</span></td><td className="py-2.5 text-right">{line.packs}</td><td className="py-2.5 text-right">{money(line.pricePerPack)}</td><td className="py-2.5 text-right font-semibold">{money(line.lineTotal)}</td></tr>)}</tbody>
             </table>
           </div>
           <div className="mt-4 ml-auto max-w-xs space-y-2 text-xs">
@@ -273,7 +259,7 @@ function SaleReceipt({
           <div className="receipt-line"><span>Customer</span><strong>{buyer.name}</strong></div>
           {buyer.phone && <div className="receipt-line"><span>Phone</span><strong>{buyer.phone}</strong></div>}
           <div className="receipt-divider" />
-          {sale.legacyImported ? <div className="receipt-line"><span>{sale.product} · {sale.quantity} units (imported historical record)</span><strong>{money(sale.total)}</strong></div> : lines.map((line, index) => <div key={`${line.variantId || line.productId || line.productCode}-${index}`} className="receipt-line"><span>{line.productName} · {line.packs} {line.saleUnit || line.packType || 'unit'} × {money(line.pricePerPack)}</span><strong>{money(line.lineTotal)}</strong></div>)}
+          {lines.map((line, index) => <div key={`${line.variantId || line.productCode}-${index}`} className="receipt-line"><span>{line.productName} · {line.packs} {line.saleUnit || 'unit'} × {money(line.pricePerPack)}</span><strong>{money(line.lineTotal)}</strong></div>)}
           <div className="receipt-divider" />
           <div className="receipt-total"><span>Total</span><strong>{money(sale.total)}</strong></div>
           <div className="receipt-line"><span>Paid</span><strong>{money(sale.paidAmount ?? sum(payments.map((payment) => payment.amount)))}</strong></div>
@@ -316,32 +302,30 @@ function SaleForm({
   const [dueDate, setDueDate] = useState('')
   const [method, setMethod] = useState<SalePayment['method']>('Cash')
   const [paymentAmount, setPaymentAmount] = useState(0)
-  const [lines, setLines] = useState<DraftLine[]>([{ key: createId('LINE'), productId: '', packs: '1', price: '', reason: '' }])
+  const [lines, setLines] = useState<DraftLine[]>([{ key: createId('LINE'), variantId: '', quantity: '1', price: '', reason: '' }])
   const [error, setError] = useState('')
   const [salePending, setSalePending] = useState(false)
-  const [bonusDisabled, setBonusDisabled] = useState(false)
-  const [bonusDisabledReason, setBonusDisabledReason] = useState('')
   const idempotencyKey = useRef(createId('SALE'))
   const customerPickerRef = useRef<HTMLDivElement>(null)
-  const productsQuery = useQuery({ queryKey: productQueryKey, queryFn: listProductionProducts })
-  const bonusSettingsQuery = useQuery({ queryKey: ['sales-bonus-settings'], queryFn: getSalesBonusSettings })
-  const activeProducts = productsQuery.data?.products.filter((product) =>
-    product.active && product.packType && product.piecesPerPack && product.price && product.price > 0,
-  ) ?? []
-  const availablePacksFor = (productId: string) => {
-    const product = activeProducts.find((item) => item.id === productId)
-    return product
-      ? Math.max(0, product.availablePacks ?? product.balancePacks - (product.reservedPacks ?? 0))
-      : 0
+  const productsQuery = useQuery({ queryKey: productQueryKey, queryFn: listBakeryOrderCatalog })
+  const activeProducts = (productsQuery.data ?? []).filter((product) =>
+    product.id && product.sku && product.name && product.saleUnit &&
+    Number.isSafeInteger(product.unitsPerSaleUnit) && product.unitsPerSaleUnit > 0 &&
+    Number.isSafeInteger(product.price) && product.price > 0 &&
+    Number.isSafeInteger(product.availableQuantity) && product.availableQuantity >= 0,
+  )
+  const availableQuantityFor = (variantId: string) => {
+    const product = activeProducts.find((item) => item.id === variantId)
+    return product ? Math.max(0, product.availableQuantity) : 0
   }
-  const requestedPacksByProduct = lines.reduce((totals, line) => {
-    if (line.productId) totals.set(line.productId, (totals.get(line.productId) ?? 0) + (Number(line.packs) || 0))
+  const requestedQuantityByVariant = lines.reduce((totals, line) => {
+    if (line.variantId) totals.set(line.variantId, (totals.get(line.variantId) ?? 0) + (Number(line.quantity) || 0))
     return totals
   }, new Map<string, number>())
-  const hasInsufficientStock = [...requestedPacksByProduct].some(([productId, packs]) =>
-    packs > availablePacksFor(productId),
+  const hasInsufficientStock = [...requestedQuantityByVariant].some(([variantId, quantity]) =>
+    quantity > availableQuantityFor(variantId),
   )
-  const hasSellableStock = activeProducts.some((product) => availablePacksFor(product.id) > 0)
+  const hasSellableStock = activeProducts.some((product) => availableQuantityFor(product.id) > 0)
   const stockUnavailable = productsQuery.isLoading || productsQuery.isError || !hasSellableStock
   const guest = !customerId
   const selectedCustomer = customers.find((customer) => customer.id === customerId)
@@ -352,24 +336,8 @@ function SaleForm({
     customer.name.toLowerCase().includes(customerSearch.trim().toLowerCase()),
   )
   const canOverridePrice = user.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
-  const total = lines.reduce((sumLines, line) => sumLines + (Number(line.packs) || 0) * Number(line.price || 0), 0)
+  const total = lines.reduce((sumLines, line) => sumLines + (Number(line.quantity) || 0) * Number(line.price || 0), 0)
   const todayValue = today()
-  const eligibleBoxQuantity = lines.reduce((total, line) => {
-    const product = activeProducts.find((item) => item.id === line.productId)
-    return product?.packType === 'Box' ? total + (Number(line.packs) || 0) : total
-  }, 0)
-  const bonusPreview = (() => {
-    const settings = bonusSettingsQuery.data?.salesBonus
-    if (!settings?.enabled || bonusDisabled || !eligibleBoxQuantity) return 0
-    if (eligibleBoxQuantity >= settings.volume.minimumQuantity) {
-      return Math.floor(eligibleBoxQuantity / settings.volume.qualifyingQuantity) * settings.volume.bonusQuantity
-    }
-    if (eligibleBoxQuantity >= settings.standard.minimumQuantity && eligibleBoxQuantity <= settings.standard.maximumQuantity) {
-      return Math.floor(eligibleBoxQuantity / settings.standard.qualifyingQuantity) * settings.standard.bonusQuantity
-    }
-    return 0
-  })()
-  const canDisableBonus = user.roles.some((role) => ['Sales Manager', 'General Manager', 'Super Admin'].includes(role))
 
   useEffect(() => {
     if (!customerMenuOpen) return
@@ -426,16 +394,16 @@ function SaleForm({
     setTerms(value)
     if (value === 'Paid now') setPaymentAmount(total)
   }
-  const changeProduct = (key: string, productId: string) => {
-    const product = activeProducts.find((item) => item.id === productId)
+  const changeProduct = (key: string, variantId: string) => {
+    const product = activeProducts.find((item) => item.id === variantId)
     setLines((current) => current.map((line) =>
-      line.key === key ? { ...line, productId, price: product?.price ? String(product.price) : '', reason: '' } : line,
+      line.key === key ? { ...line, variantId, price: product?.price ? String(product.price) : '', reason: '' } : line,
     ))
   }
   const changeTermTotal = (nextLines: DraftLine[]) => {
     setLines(nextLines)
     if (terms === 'Paid now' || guest) {
-      setPaymentAmount(nextLines.reduce((value, line) => value + (Number(line.packs) || 0) * Number(line.price || 0), 0))
+      setPaymentAmount(nextLines.reduce((value, line) => value + (Number(line.quantity) || 0) * Number(line.price || 0), 0))
     }
   }
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -449,16 +417,16 @@ function SaleForm({
       if (!hasSellableStock) throw new Error('There is no sellable stock available for this sale.')
       if (hasInsufficientStock) throw new Error('The requested quantity exceeds available stock. Reduce the quantity or choose another product.')
       const saleLines = lines.map((line) => {
-        const packs = Number(line.packs)
-        if (!Number.isSafeInteger(packs) || packs < 1) throw new Error('Enter a positive whole-number quantity for every product.')
-        const product = activeProducts.find((item) => item.id === line.productId)
-        if (!product) throw new Error('Choose an active priced product with valid pack details for every line.')
+        const packs = Number(line.quantity)
+        if (!Number.isSafeInteger(packs) || packs < 1) throw new Error('Enter a positive whole-number quantity for every bakery product.')
+        const product = activeProducts.find((item) => item.id === line.variantId)
+        if (!product) throw new Error('Choose an active bakery product with a valid sale unit and price for every line.')
         const catalogPrice = product.price ?? 0
         const selectedPrice = Number(line.price)
-        if (!Number.isInteger(selectedPrice) || selectedPrice <= 0) throw new Error('Enter a positive whole-UGX price per pack.')
+        if (!Number.isInteger(selectedPrice) || selectedPrice <= 0) throw new Error('Enter a positive whole-UGX price per sale unit.')
         if (selectedPrice !== catalogPrice && !line.reason.trim()) throw new Error(`Provide a reason for the ${product.name} price override.`)
         return {
-          productId: product.id,
+          variantId: product.id,
           packs,
           ...(selectedPrice !== catalogPrice ? { pricePerPack: selectedPrice, overrideReason: line.reason.trim() } : {}),
         }
@@ -468,7 +436,6 @@ function SaleForm({
       if (termsToSubmit === 'Credit' && !dueDate) throw new Error('Select a due date for a credit sale.')
       if (amountToSubmit > total) throw new Error('Initial payment cannot exceed the sale total.')
       if (amountToSubmit < total && !savedCustomer) throw new Error('One-time customer sales must be paid in full at the time of sale.')
-      if (bonusDisabled && !bonusDisabledReason.trim()) throw new Error('Provide a reason for disabling the sales bonus.')
       setSalePending(true)
       return await onSubmit({
         customerId: savedCustomer?.id,
@@ -479,7 +446,6 @@ function SaleForm({
         initialPaymentAmount: amountToSubmit,
         initialPaymentMethod: amountToSubmit ? method : undefined,
         idempotencyKey: idempotencyKey.current,
-        ...(bonusDisabled ? { bonusDisabled: true, bonusDisabledReason: bonusDisabledReason.trim() } : {}),
       })
     } catch (caught) {
       setError(errorMessage(caught))
@@ -551,37 +517,37 @@ function SaleForm({
           {!customersAvailable && <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">Saved customer profiles are unavailable. You can proceed with a fully paid walk-in sale. <button type="button" onClick={onRetryCustomers} className="font-semibold underline">Retry customer loading</button></p>}
 
           <section>
-            <div className="mb-3 flex items-center justify-between"><h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">Products</h3><button type="button" disabled={salePending} onClick={() => changeTermTotal([...lines, { key: createId('LINE'), productId: '', packs: '1', price: '', reason: '' }])} className="inline-flex items-center gap-1 text-xs font-semibold text-primary"><Plus className="size-3.5" /> Add product</button></div>
-            {productsQuery.isLoading && <p role="status" className="text-xs text-slate-500">Loading product prices…</p>}
+            <div className="mb-3 flex items-center justify-between"><h3 className="text-xs font-bold uppercase tracking-wide text-slate-400">Bakery products</h3><button type="button" disabled={salePending} onClick={() => changeTermTotal([...lines, { key: createId('LINE'), variantId: '', quantity: '1', price: '', reason: '' }])} className="inline-flex items-center gap-1 text-xs font-semibold text-primary"><Plus className="size-3.5" /> Add product</button></div>
+            {productsQuery.isLoading && <p role="status" className="text-xs text-slate-500">Loading bakery products and stock…</p>}
             {productsQuery.isError && <p role="alert" className="text-xs text-rose-700">{errorMessage(productsQuery.error)} <button type="button" onClick={() => void productsQuery.refetch()} className="font-semibold underline">Retry</button></p>}
-            {!productsQuery.isLoading && activeProducts.length === 0 && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">No active products have a catalog price and valid outer-pack size. Configure product price and packaging in Production Management before recording sales.</p>}
+            {!productsQuery.isLoading && !productsQuery.isError && activeProducts.length === 0 && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">No active bakery products have a valid sale unit and catalog price. Configure bakery products and variants in Production Management before recording sales.</p>}
             {!productsQuery.isLoading && !productsQuery.isError && activeProducts.length > 0 && !hasSellableStock && <p role="alert" className="mb-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm font-medium text-amber-900">There is no sellable stock available. Restock a product before recording a sale.</p>}
             <div className="space-y-3">{lines.map((line, index) => {
-              const product = activeProducts.find((item) => item.id === line.productId)
-              const availablePacks = product ? availablePacksFor(product.id) : 0
-              const otherRequestedPacks = lines.reduce((totalPacks, item) =>
-                item.productId === line.productId && item.key !== line.key ? totalPacks + (Number(item.packs) || 0) : totalPacks,
+              const product = activeProducts.find((item) => item.id === line.variantId)
+              const availableQuantity = product ? availableQuantityFor(product.id) : 0
+              const otherRequestedQuantity = lines.reduce((totalQuantity, item) =>
+                item.variantId === line.variantId && item.key !== line.key ? totalQuantity + (Number(item.quantity) || 0) : totalQuantity,
               0)
-              const lineStockExceeded = Boolean(product && (requestedPacksByProduct.get(product.id) ?? 0) > availablePacks)
+              const lineStockExceeded = Boolean(product && (requestedQuantityByVariant.get(product.id) ?? 0) > availableQuantity)
               const catalogPrice = product?.price ?? 0
               const overridden = Boolean(product && Number(line.price) !== catalogPrice)
               return <div key={line.key} className="grid items-end gap-3 rounded-lg border border-slate-200 p-3 sm:grid-cols-[minmax(0,1fr)_90px_145px_36px]">
-                <label className="text-xs font-semibold text-slate-600">Product
-                  <select required value={line.productId} disabled={salePending} onChange={(event) => changeProduct(line.key, event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
-                    <option value="">Choose product</option>
+                <label className="text-xs font-semibold text-slate-600">Bakery product
+                  <select required value={line.variantId} disabled={salePending} onChange={(event) => changeProduct(line.key, event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
+                    <option value="">Choose bakery product</option>
                     {activeProducts.map((item) => {
-                      const available = availablePacksFor(item.id)
-                      return <option key={item.id} value={item.id} disabled={available === 0}>{item.name} · {item.packType} · {money(item.price ?? 0)}/pack · {available > 0 ? `${available} available` : 'Out of stock'}</option>
+                      const available = availableQuantityFor(item.id)
+                      return <option key={item.id} value={item.id} disabled={available === 0}>{item.name} · {item.sku} · {money(item.price)}/{item.saleUnit} · {available > 0 ? `${available} ${item.saleUnit} available` : 'Out of stock'}</option>
                     })}
                   </select>
-                  {product && <span className="mt-1 block text-[10px] font-normal text-slate-400">Available: {availablePacks.toLocaleString()} {packUnitLabel(product.packType, availablePacks)} · {product.loosePieces ?? 0} loose pieces not sellable</span>}
+                  {product && <span className="mt-1 block text-[10px] font-normal text-slate-400">SKU {product.sku} · Available: {availableQuantity.toLocaleString()} {product.saleUnit}</span>}
                 </label>
-                <label className="text-xs font-semibold text-slate-600">Quantity ({packUnitLabel(product?.packType)})<input required type="number" min="1" max={Math.max(1, availablePacks - otherRequestedPacks)} step="1" value={line.packs} disabled={salePending || !product || availablePacks === 0} onChange={(event) => changeTermTotal(lines.map((item) => item.key === line.key ? { ...item, packs: event.target.value } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
-                <label className="text-xs font-semibold text-slate-600">Price / {packUnitLabel(product?.packType, 1)} (UGX)<input required type="number" min="1" step="1" value={line.price} disabled={salePending || !canOverridePrice} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, price: event.target.value } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
+                <label className="text-xs font-semibold text-slate-600">Quantity ({product?.saleUnit || 'unit'})<input required type="number" min="1" max={Math.max(1, availableQuantity - otherRequestedQuantity)} step="1" value={line.quantity} disabled={salePending || !product || availableQuantity === 0} onChange={(event) => changeTermTotal(lines.map((item) => item.key === line.key ? { ...item, quantity: event.target.value } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
+                <label className="text-xs font-semibold text-slate-600">Price / {product?.saleUnit || 'unit'} (UGX)<input required type="number" min="1" step="1" value={line.price} disabled={salePending || !canOverridePrice} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, price: event.target.value } : item))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-2 py-2.5 text-sm disabled:bg-slate-50" /></label>
                 <button type="button" aria-label={`Remove product ${index + 1}`} disabled={salePending || lines.length === 1} onClick={() => changeTermTotal(lines.filter((item) => item.key !== line.key))} className="grid size-9 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-30"><X className="size-4" /></button>
                 {overridden && <label className="text-xs font-semibold text-amber-800 sm:col-span-4">Reason for price override<input required value={line.reason} disabled={salePending} onChange={(event) => setLines((current) => current.map((item) => item.key === line.key ? { ...item, reason: event.target.value } : item))} maxLength={500} className="mt-1.5 w-full rounded-lg border border-amber-200 px-3 py-2 text-sm" /></label>}
-                {lineStockExceeded && <p role="alert" className="text-xs font-medium text-rose-700 sm:col-span-4">Requested quantity exceeds available stock ({availablePacks} {packUnitLabel(product?.packType, availablePacks)} available).</p>}
-                <div className="text-right text-xs text-slate-500 sm:col-span-4">Line total: <strong className="text-slate-800">{money((Number(line.packs) || 0) * Number(line.price || 0))}</strong></div>
+                {lineStockExceeded && <p role="alert" className="text-xs font-medium text-rose-700 sm:col-span-4">Requested quantity exceeds available stock ({availableQuantity} {product?.saleUnit} available).</p>}
+                <div className="text-right text-xs text-slate-500 sm:col-span-4">Line total: <strong className="text-slate-800">{money((Number(line.quantity) || 0) * Number(line.price || 0))}</strong></div>
               </div>
             })}</div>
             <div className="mt-3 flex justify-end border-t border-slate-100 pt-3 text-sm font-bold">Sale total: <span className="ml-2 text-primary">{money(total)}</span></div>
@@ -598,29 +564,6 @@ function SaleForm({
             <label className="text-xs font-semibold text-slate-600">Initial payment (UGX)<input type="number" min="0" step="1" value={guest || terms === 'Paid now' ? total : paymentAmount} disabled={guest || terms === 'Paid now' || salePending} onChange={(event) => setPaymentAmount(Math.max(0, Number(event.target.value)))} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm disabled:bg-slate-50" /></label>
             {(guest || terms === 'Paid now' || paymentAmount > 0) && <label className="text-xs font-semibold text-slate-600">Payment method<select value={method} disabled={salePending} onChange={(event) => setMethod(event.target.value as SalePayment['method'])} className="mt-1.5 w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm">{paymentMethods.map((item) => <option key={item}>{item}</option>)}</select></label>}
           </section>
-          <section className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h3 className="text-xs font-bold text-emerald-900">Sales bonus preview</h3>
-                <p className="mt-1 text-xs leading-5 text-emerald-800">
-                  {eligibleBoxQuantity.toLocaleString()} eligible box packs · {bonusPreview.toLocaleString()} free boxes
-                </p>
-                <p className="mt-1 text-[10px] leading-4 text-emerald-700">Carton packs do not qualify for this bonus.</p>
-              </div>
-              {canDisableBonus && (
-                <label className="flex min-h-11 items-center gap-2 text-xs font-semibold text-slate-700">
-                  <input type="checkbox" checked={bonusDisabled} disabled={salePending} onChange={(event) => { setBonusDisabled(event.target.checked); if (!event.target.checked) setBonusDisabledReason('') }} className="size-4 accent-primary" />
-                  Disable bonus
-                </label>
-              )}
-            </div>
-            {bonusDisabled && (
-              <label className="mt-3 block text-xs font-semibold text-slate-700">
-                Reason for disabling the bonus
-                <textarea required value={bonusDisabledReason} disabled={salePending} onChange={(event) => setBonusDisabledReason(event.target.value)} maxLength={500} rows={3} className="mt-1.5 w-full rounded-lg border border-amber-200 bg-white px-3 py-2.5 text-sm font-normal outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" placeholder="Explain why this sale does not receive the bonus" />
-              </label>
-            )}
-          </section>
           {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</p>}
           <footer className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" disabled={salePending} onClick={onCancel} className="rounded-lg border border-slate-200 px-4 py-2.5 text-xs font-semibold">Cancel</button><button type="submit" disabled={salePending || stockUnavailable || !activeProducts.length || hasInsufficientStock} className="rounded-lg bg-primary px-4 py-2.5 text-xs font-semibold text-primary-foreground disabled:opacity-50">{salePending ? 'Saving sale…' : 'Complete sale'}</button></footer>
         </form>
@@ -635,7 +578,6 @@ export default function SalesManagementPage({
   currentUser,
   salesLoading,
   salesError,
-  salesWarning,
   onRetrySales,
   onSaleUpdated,
   companyName,
@@ -709,7 +651,7 @@ export default function SalesManagementPage({
     enabled: mode === 'sales',
   })
   const pendingOrders = (pendingOrdersQuery.data ?? [])
-    .filter((order) => order.status === 'Pending' && !order.archivedAt && !order.legacyImported)
+    .filter((order) => order.status === 'Pending' && !order.archivedAt)
     .sort((left, right) => {
       if (left.priority !== right.priority) return left.priority === 'High' ? -1 : 1
       return left.createdAt.localeCompare(right.createdAt)
@@ -727,12 +669,11 @@ export default function SalesManagementPage({
   })
   const stockProductsQuery = useQuery({
     queryKey: productQueryKey,
-    queryFn: listProductionProducts,
+    queryFn: listBakeryOrderCatalog,
     enabled: mode === 'sales',
   })
-  const stockProducts = stockProductsQuery.data?.products ?? []
-  const productsWithAvailableStock = stockProducts.filter((product) => product.active
-    && (product.availablePacks ?? Math.max(0, product.balancePacks - (product.reservedPacks ?? 0))) > 0).length
+  const stockProducts = stockProductsQuery.data ?? []
+  const productsWithAvailableStock = stockProducts.filter((product) => product.availableQuantity > 0).length
   const visibleSales = useMemo(() => state.sales.filter((sale) => {
     const searchable = `${sale.reference} ${sale.customer} ${sale.product} ${sale.lines?.map((line) => line.productName).join(' ') ?? ''}`.toLowerCase()
     if (!searchable.includes(search.toLowerCase())) return false
@@ -838,6 +779,7 @@ export default function SalesManagementPage({
     const result = await createSale(input)
     if (!result.sale.receiptNumber) throw new ApiError('Sale was not completed because the server did not return its receipt number.', 502)
     onSaleUpdated(result.sale, result.payments)
+    await queryClient.invalidateQueries({ queryKey: productQueryKey })
     setShowForm(false)
     setReceiptSale(result.sale)
     return result.sale
@@ -883,7 +825,6 @@ export default function SalesManagementPage({
         <div><div className="mb-2 text-xs font-medium text-slate-400">Workspace / Sales Department</div><h2 className="text-2xl font-bold tracking-tight">{mode === 'credit' ? 'Credit Sales' : 'Sales'}</h2><p className="mt-1 text-sm text-slate-500">{mode === 'credit' ? 'Track outstanding customer balances and record repayments.' : 'Record catalog-priced sales, dispatch finished stock, and issue receipts.'}</p></div>
         <div className="flex gap-2"><button type="button" onClick={() => exportCsv(mode === 'credit' ? 'credit-sales.csv' : 'sales.csv', visibleSales.map((sale) => ({ reference: sale.receiptNumber || sale.reference, customer: sale.customer, date: sale.date, products: sale.product, total: sale.total, paid: paidAmountForSale(sale.id, state.payments), balance: Math.max(0, sale.total - paidAmountForSale(sale.id, state.payments)), paymentTerms: sale.paymentTerms }))) } className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold"><Download className="size-4" /> Export CSV</button>{mode === 'sales' && canCreate && <button type="button" onClick={() => setShowForm(true)} className="inline-flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-primary-foreground"><Plus className="size-4" /> Add sale</button>}</div>
       </header>
-      {salesWarning && <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">{salesWarning}</p>}
       {mode === 'sales' ? <section className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-slate-200 bg-white p-4">
           <div className="flex items-start justify-between gap-2">
@@ -932,13 +873,13 @@ export default function SalesManagementPage({
               </>}
         </article>
         <article className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-slate-600">Product stock availability</h3><span className="rounded-full bg-sky-50 px-2 py-0.5 text-[9px] font-semibold uppercase text-sky-700">Live</span></div>
-          {stockProductsQuery.isLoading ? <p role="status" className="mt-2 text-[10px] text-slate-400">Loading product stock…</p>
-            : stockProductsQuery.isError ? <div className="mt-2"><p role="alert" className="text-[10px] text-rose-700">Product stock could not be loaded.</p><button type="button" onClick={() => { void stockProductsQuery.refetch() }} className="mt-1 text-[10px] font-semibold text-primary hover:underline">Retry</button></div>
-              : <><p className="mt-1 text-lg font-bold tabular-nums text-slate-900">{productsWithAvailableStock.toLocaleString()} <span className="text-xs font-medium text-slate-500">products with stock</span></p><ul aria-label="Available stock by product" className="mt-2 max-h-24 space-y-1 overflow-y-auto border-t border-slate-100 pt-2">{stockProducts.length ? stockProducts.map((product) => {
-                const available = product.availablePacks ?? Math.max(0, product.balancePacks - (product.reservedPacks ?? 0))
-                return <li key={product.id} className="flex items-center justify-between gap-2 text-[10px]"><span className="min-w-0 truncate font-medium text-slate-600">{product.name}{!product.active ? ' · inactive' : ''}</span><span className={`shrink-0 font-semibold tabular-nums ${available > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>{available.toLocaleString()} {packUnitLabel(product.packType, available)}</span></li>
-              }) : <li className="text-[10px] text-slate-400">No products found</li>}</ul></>}
+          <div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-slate-600">Bakery stock availability</h3><span className="rounded-full bg-sky-50 px-2 py-0.5 text-[9px] font-semibold uppercase text-sky-700">Live</span></div>
+          {stockProductsQuery.isLoading ? <p role="status" className="mt-2 text-[10px] text-slate-400">Loading bakery stock…</p>
+            : stockProductsQuery.isError ? <div className="mt-2"><p role="alert" className="text-[10px] text-rose-700">Bakery stock could not be loaded.</p><button type="button" onClick={() => { void stockProductsQuery.refetch() }} className="mt-1 text-[10px] font-semibold text-primary hover:underline">Retry</button></div>
+              : <><p className="mt-1 text-lg font-bold tabular-nums text-slate-900">{productsWithAvailableStock.toLocaleString()} <span className="text-xs font-medium text-slate-500">bakery variants with stock</span></p><ul aria-label="Available bakery stock by variant" className="mt-2 max-h-24 space-y-1 overflow-y-auto border-t border-slate-100 pt-2">{stockProducts.length ? stockProducts.map((product) => {
+                const available = product.availableQuantity
+                return <li key={product.id} className="flex items-center justify-between gap-2 text-[10px]"><span className="min-w-0 truncate font-medium text-slate-600">{product.name} · {product.sku}</span><span className={`shrink-0 font-semibold tabular-nums ${available > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>{available.toLocaleString()} {product.saleUnit}</span></li>
+              }) : <li className="text-[10px] text-slate-400">No bakery variants found</li>}</ul></>}
         </article>
       </section> : <section className="mb-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Outstanding credit</div><div className="mt-1 font-bold">{money(sum(outstandingSales.map((sale) => Math.max(0, sale.total - paidAmountForSale(sale.id, state.payments)))))}</div></div>
@@ -959,7 +900,7 @@ export default function SalesManagementPage({
           {creditSalesForView.map((sale) => {
             const paid = paidAmountForSale(sale.id, state.payments)
             const balance = Math.max(0, sale.total - paid)
-            const productNames = sale.lines?.map((line) => `${line.productName} × ${line.packs} ${line.saleUnit || line.packType || 'unit'}`).join(', ') || sale.product
+            const productNames = sale.lines?.map((line) => `${line.productName} × ${line.packs} ${line.saleUnit || 'unit'}`).join(', ') || sale.product
             return <tr key={sale.id} className="border-t border-slate-100 text-slate-600"><td className="px-4 py-3 font-semibold text-slate-800">{sale.receiptNumber || sale.reference}</td><td className="px-4 py-3">{formatDate(sale.date)}</td>{mode === 'credit' && <td className={`px-4 py-3 ${sale.dueDate && sale.dueDate < todayDate && balance > 0 ? 'font-semibold text-rose-700' : ''}`}>{sale.dueDate ? formatDate(sale.dueDate) : 'Needs review'}</td>}<td className="px-4 py-3">{sale.customer}</td>{mode === 'credit' && <td className="px-4 py-3">{salesOwners.data?.find((owner) => owner.id === sale.assignedTo)?.name || 'Unassigned'}</td>}<td className="max-w-72 truncate px-4 py-3" title={productNames}>{productNames}</td><td className="px-4 py-3 font-semibold">{money(sale.total)}</td><td className="px-4 py-3">{money(paid)} / {money(balance)}</td><td className="px-4 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${balance ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>{paymentStateForSale(sale, state.payments)}</span></td><td className="px-4 py-3">
               {mode === 'credit' ? <div ref={creditActionMenuFor === sale.id ? creditActionMenuRef : null} className="relative flex justify-end">
                 <button
