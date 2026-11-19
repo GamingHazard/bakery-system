@@ -1,0 +1,142 @@
+import { describe, expect, it } from 'vitest'
+import { summarizeFinishedProductInventory } from '@/lib/dashboard-inventory'
+import type { BakeryProductFamily, FinishedStockLotRecord } from '@/lib/user-api'
+
+const families: BakeryProductFamily[] = [
+  {
+    id: 'active-family',
+    code: 'AF',
+    name: 'Active family',
+    category: 'Bread',
+    flavour: '',
+    baseUnit: 'loaf',
+    activeRecipeId: null,
+    shelfLifeDays: 3,
+    dateLabelType: 'best_before',
+    storageInstructions: '',
+    active: true,
+    storefront: {
+      published: true,
+      description: '',
+      images: [],
+      ingredientsStatement: '',
+      allergens: [],
+    },
+    variants: [
+      {
+        id: 'low-sku',
+        familyId: 'active-family',
+        sku: 'LOW',
+        name: 'Low stock',
+        saleUnit: 'loaf',
+        unitsPerSaleUnit: 1,
+        price: 2000,
+        lowStockThreshold: 10,
+        active: true,
+      },
+      {
+        id: 'inactive-sku',
+        familyId: 'active-family',
+        sku: 'INACTIVE',
+        name: 'Inactive',
+        saleUnit: 'loaf',
+        unitsPerSaleUnit: 1,
+        price: 1000,
+        lowStockThreshold: 10,
+        active: false,
+      },
+    ],
+    recipe: null,
+  },
+  {
+    id: 'unavailable-family',
+    code: 'UF',
+    name: 'Unavailable family',
+    category: 'Bread',
+    flavour: '',
+    baseUnit: 'loaf',
+    activeRecipeId: null,
+    shelfLifeDays: 3,
+    dateLabelType: 'best_before',
+    storageInstructions: '',
+    active: false,
+    storefront: {
+      published: false,
+      description: '',
+      images: [],
+      ingredientsStatement: '',
+      allergens: [],
+    },
+    variants: [
+      {
+        id: 'out-sku',
+        familyId: 'unavailable-family',
+        sku: 'OUT',
+        name: 'Out of stock',
+        saleUnit: 'loaf',
+        unitsPerSaleUnit: 1,
+        price: 1500,
+        lowStockThreshold: 5,
+        active: true,
+      },
+    ],
+    recipe: null,
+  },
+]
+
+const lots: FinishedStockLotRecord[] = [
+  {
+    id: 'lot-low',
+    reference: 'LOT-1',
+    batchId: 'batch-1',
+    familyId: 'active-family',
+    variantId: 'low-sku',
+    sku: 'LOW',
+    productName: 'Low stock',
+    saleUnit: 'loaf',
+    unitsPerSaleUnit: 1,
+    location: 'Main',
+    productionDate: '2026-11-18',
+    expiryDate: '2026-11-21',
+    dateLabelType: 'best_before',
+    producedQuantity: 8,
+    remainingQuantity: 8,
+    reservedQuantity: 3,
+    status: 'active',
+  },
+  {
+    id: 'lot-written-off',
+    reference: 'LOT-2',
+    batchId: 'batch-2',
+    familyId: 'active-family',
+    variantId: 'low-sku',
+    sku: 'LOW',
+    productName: 'Low stock',
+    saleUnit: 'loaf',
+    unitsPerSaleUnit: 1,
+    location: 'Main',
+    productionDate: '2026-11-17',
+    expiryDate: '2026-11-20',
+    dateLabelType: 'best_before',
+    producedQuantity: 5,
+    remainingQuantity: 5,
+    reservedQuantity: 0,
+    status: 'written_off',
+  },
+]
+
+describe('finished-product inventory summary', () => {
+  it('counts catalog status by family while keeping stock metrics by active SKU', () => {
+    expect(summarizeFinishedProductInventory(families, lots)).toEqual({
+      stockValue: 16000,
+      lowStockSkus: 1,
+      outOfStockSkus: 1,
+      availableFamilies: 1,
+      totalProducts: 2,
+      activeProducts: 1,
+      inactiveProducts: 1,
+      publishedProducts: 1,
+      unpublishedProducts: 1,
+    })
+  })
+})

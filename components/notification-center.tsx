@@ -59,6 +59,7 @@ function sectionForResource(type: string) {
     case 'raw_material_lot':
       return 'Raw Material Management'
     case 'finished_stock_lot':
+    case 'bakery_product_variant':
       return 'Production Management'
     case 'user':
       return 'User Management'

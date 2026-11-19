@@ -95,6 +95,8 @@ describe("orders API client", () => {
       unitsPerSaleUnit: 1,
       price: 12000,
       availableQuantity: 4,
+      lowStockThreshold: 10,
+      stockState: "low_stock",
     };
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({ products: [product] }),

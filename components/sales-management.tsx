@@ -23,12 +23,18 @@ type Props = {
 type DraftLine = { key: string; variantId: string; quantity: string; price: string; reason: string }
 type SalePaymentDraft = { amount: number; date: string; method: SalePayment['method']; txnID: string; note: string }
 type SalesPeriod = 'today' | 'week' | 'month'
+type BakeryStockTab = 'stocked' | 'low_stock' | 'out_of_stock'
 
 const paymentMethods: SalePayment['method'][] = ['Cash', 'Mobile Money', 'Bank Transfer', 'Check', 'Card']
 const salesPeriodLabels: Record<SalesPeriod, string> = {
   today: 'Today',
   week: 'This week',
   month: 'This month',
+}
+const bakeryStockTabLabels: Record<BakeryStockTab, string> = {
+  stocked: 'Stocked',
+  low_stock: 'Low stock',
+  out_of_stock: 'Out of stock',
 }
 const today = () => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Africa/Kampala',
@@ -588,6 +594,8 @@ export default function SalesManagementPage({
   const [search, setSearch] = useState('')
   const [salesPeriod, setSalesPeriod] = useState<SalesPeriod>('today')
   const [salesPeriodMenuOpen, setSalesPeriodMenuOpen] = useState(false)
+  const [stockAvailabilityOpen, setStockAvailabilityOpen] = useState(false)
+  const [stockAvailabilityTab, setStockAvailabilityTab] = useState<BakeryStockTab>('stocked')
   const [creditActionMenuFor, setCreditActionMenuFor] = useState<string | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [receiptSale, setReceiptSale] = useState<Sale | null>(null)
@@ -627,6 +635,14 @@ export default function SalesManagementPage({
       document.removeEventListener('keydown', closeOnEscape)
     }
   }, [salesPeriodMenuOpen])
+  useEffect(() => {
+    if (!stockAvailabilityOpen) return
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setStockAvailabilityOpen(false)
+    }
+    document.addEventListener('keydown', closeOnEscape)
+    return () => document.removeEventListener('keydown', closeOnEscape)
+  }, [stockAvailabilityOpen])
   useEffect(() => {
     if (!creditActionMenuFor) return
     const closeOnOutsideClick = (event: PointerEvent) => {
@@ -699,6 +715,36 @@ export default function SalesManagementPage({
     enabled: Boolean(statementCustomerId),
   })
   const todayDate = today()
+  const salesWeekStart = salesPeriodStart('week', todayDate)
+  const soldQuantityByVariant = new Map<string, number>()
+  for (const sale of state.sales) {
+    const saleDate = sale.date.slice(0, 10)
+    if (saleDate < salesWeekStart || saleDate > todayDate) continue
+    for (const line of sale.lines ?? []) {
+      if (!line.variantId || !Number.isSafeInteger(line.packs) || line.packs < 1) continue
+      soldQuantityByVariant.set(
+        line.variantId,
+        (soldQuantityByVariant.get(line.variantId) ?? 0) + line.packs,
+      )
+    }
+  }
+  const topSellingStockProducts = stockProducts
+    .map((product) => ({
+      ...product,
+      soldQuantity: soldQuantityByVariant.get(product.id) ?? 0,
+    }))
+    .filter((product) => product.soldQuantity > 0)
+    .sort((left, right) =>
+      right.soldQuantity - left.soldQuantity ||
+      left.sku.localeCompare(right.sku) ||
+      left.id.localeCompare(right.id),
+    )
+    .slice(0, 2)
+  const stockProductsByTab = {
+    stocked: stockProducts.filter((product) => product.stockState === 'stocked'),
+    low_stock: stockProducts.filter((product) => product.stockState === 'low_stock'),
+    out_of_stock: stockProducts.filter((product) => product.stockState === 'out_of_stock'),
+  }
   const periodStartDate = salesPeriodStart(salesPeriod, todayDate)
   const periodSalesTotal = sum(state.sales
     .filter((sale) => {
@@ -873,13 +919,24 @@ export default function SalesManagementPage({
               </>}
         </article>
         <article className="rounded-xl border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between gap-2"><h3 className="text-xs font-semibold text-slate-600">Bakery stock availability</h3><span className="rounded-full bg-sky-50 px-2 py-0.5 text-[9px] font-semibold uppercase text-sky-700">Live</span></div>
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-xs font-semibold text-slate-600">Bakery stock availability</h3>
+            <button type="button" onClick={() => setStockAvailabilityOpen(true)} disabled={stockProductsQuery.isError || stockProductsQuery.isLoading} className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">See all</button>
+          </div>
           {stockProductsQuery.isLoading ? <p role="status" className="mt-2 text-[10px] text-slate-400">Loading bakery stock…</p>
             : stockProductsQuery.isError ? <div className="mt-2"><p role="alert" className="text-[10px] text-rose-700">Bakery stock could not be loaded.</p><button type="button" onClick={() => { void stockProductsQuery.refetch() }} className="mt-1 text-[10px] font-semibold text-primary hover:underline">Retry</button></div>
-              : <><p className="mt-1 text-lg font-bold tabular-nums text-slate-900">{productsWithAvailableStock.toLocaleString()} <span className="text-xs font-medium text-slate-500">bakery variants with stock</span></p><ul aria-label="Available bakery stock by variant" className="mt-2 max-h-24 space-y-1 overflow-y-auto border-t border-slate-100 pt-2">{stockProducts.length ? stockProducts.map((product) => {
-                const available = product.availableQuantity
-                return <li key={product.id} className="flex items-center justify-between gap-2 text-[10px]"><span className="min-w-0 truncate font-medium text-slate-600">{product.name} · {product.sku}</span><span className={`shrink-0 font-semibold tabular-nums ${available > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>{available.toLocaleString()} {product.saleUnit}</span></li>
-              }) : <li className="text-[10px] text-slate-400">No bakery variants found</li>}</ul></>}
+              : <>
+                <p className="mt-1 text-lg font-bold tabular-nums text-slate-900">{productsWithAvailableStock.toLocaleString()} <span className="text-xs font-medium text-slate-500">bakery variants with stock</span></p>
+                <p className="mt-2 border-t border-slate-100 pt-2 text-[9px] font-semibold uppercase tracking-wide text-slate-400">Most sold this week</p>
+                <ul aria-label="Top-selling bakery products this week" className="mt-1 max-h-24 space-y-1 overflow-y-auto">
+                  {topSellingStockProducts.length ? topSellingStockProducts.map((product) => (
+                    <li key={product.id} className="flex items-center justify-between gap-2 text-[10px]">
+                      <span className="min-w-0 truncate font-medium text-slate-600">{product.name} · {product.sku}</span>
+                      <span className="shrink-0 font-semibold tabular-nums text-slate-500">Sold {product.soldQuantity} · {product.availableQuantity} {product.saleUnit}</span>
+                    </li>
+                  )) : <li className="text-[10px] text-slate-400">No bakery products sold this week.</li>}
+                </ul>
+              </>}
         </article>
       </section> : <section className="mb-4 grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-slate-200 bg-white p-4"><div className="text-xs text-slate-500">Outstanding credit</div><div className="mt-1 font-bold">{money(sum(outstandingSales.map((sale) => Math.max(0, sale.total - paidAmountForSale(sale.id, state.payments)))))}</div></div>
@@ -925,6 +982,62 @@ export default function SalesManagementPage({
         </tbody></table></div>
         {!visibleSales.length && <div className="py-14 text-center text-sm text-slate-500">No sales found.</div>}
       </section>
+      {stockAvailabilityOpen && mode === 'sales' && <div className="fixed inset-0 z-[78] grid place-items-center bg-slate-950/45 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setStockAvailabilityOpen(false) }}>
+        <section role="dialog" aria-modal="true" aria-labelledby="bakery-stock-dialog-title" className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white shadow-2xl">
+          <header className="flex items-start justify-between border-b border-slate-100 px-5 py-4">
+            <div>
+              <h2 id="bakery-stock-dialog-title" className="text-base font-bold">Bakery stock availability</h2>
+              <p className="mt-1 text-xs text-slate-500">Active sellable products, current eligible stock, and their low-stock thresholds.</p>
+            </div>
+            <button type="button" aria-label="Close bakery stock availability" onClick={() => setStockAvailabilityOpen(false)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100"><X className="size-4" /></button>
+          </header>
+          <div className="p-5">
+            <div role="tablist" aria-label="Bakery stock state" className="flex gap-1 overflow-x-auto border-b border-slate-200">
+              {(Object.keys(bakeryStockTabLabels) as BakeryStockTab[]).map((tab) => (
+                <button
+                  key={tab}
+                  id={`bakery-stock-tab-${tab}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={stockAvailabilityTab === tab}
+                  aria-controls="bakery-stock-tabpanel"
+                  onClick={() => setStockAvailabilityTab(tab)}
+                  className={`shrink-0 border-b-2 px-3 py-2 text-xs font-semibold ${stockAvailabilityTab === tab ? 'border-primary text-primary' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                >
+                  {bakeryStockTabLabels[tab]} <span className="ml-1 tabular-nums">{stockProductsByTab[tab].length}</span>
+                </button>
+              ))}
+            </div>
+            <div
+              id="bakery-stock-tabpanel"
+              role="tabpanel"
+              aria-labelledby={`bakery-stock-tab-${stockAvailabilityTab}`}
+              className="mt-3"
+            >
+              {stockProductsByTab[stockAvailabilityTab].length ? (
+                <ul className="divide-y divide-slate-100">
+                  {stockProductsByTab[stockAvailabilityTab].map((product) => (
+                    <li key={product.id} className="flex flex-col justify-between gap-2 py-3 text-xs sm:flex-row sm:items-center">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-slate-800">{product.name}</p>
+                        <p className="mt-0.5 text-[10px] text-slate-500">{product.familyName} · {product.sku}</p>
+                      </div>
+                      <div className="shrink-0 sm:text-right">
+                        <p className={`font-semibold tabular-nums ${product.stockState === 'out_of_stock' ? 'text-rose-700' : product.stockState === 'low_stock' ? 'text-amber-700' : 'text-emerald-700'}`}>
+                          {product.availableQuantity.toLocaleString()} {product.saleUnit}
+                        </p>
+                        <p className="mt-0.5 text-[10px] text-slate-500">Low stock at {product.lowStockThreshold.toLocaleString()} {product.saleUnit}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="py-10 text-center text-xs text-slate-500">No active products in the {bakeryStockTabLabels[stockAvailabilityTab].toLowerCase()} category.</p>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>}
       {customerStatement.data && <div className="fixed inset-0 z-[72] grid place-items-center bg-slate-950/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) setStatementCustomerId('') }}><section role="dialog" aria-modal="true" aria-label="Customer credit statement" className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl"><div className="flex items-start justify-between"><div><h2 className="font-bold">{customerStatement.data.customer.name} credit statement</h2><p className="mt-1 text-xs text-slate-500">Credit sales and payments recorded for this customer.</p></div><button type="button" aria-label="Close customer statement" onClick={() => setStatementCustomerId('')}><X className="size-4" /></button></div><div className="my-4 grid grid-cols-3 gap-2 text-xs"><div className="rounded bg-slate-50 p-3">Credit <strong className="mt-1 block">{money(customerStatement.data.summary.totalCredit)}</strong></div><div className="rounded bg-slate-50 p-3">Paid <strong className="mt-1 block">{money(customerStatement.data.summary.totalPaid)}</strong></div><div className="rounded bg-slate-50 p-3">Outstanding <strong className="mt-1 block">{money(customerStatement.data.summary.outstanding)}</strong></div></div><div className="divide-y divide-slate-100">{customerStatement.data.sales.map((sale) => <div key={sale.id} className="flex justify-between py-3 text-xs"><span>{sale.receiptNumber} · due {sale.dueDate ? formatDate(sale.dueDate) : 'Needs review'} · {sale.payments.length} payment(s)</span><strong>{money(sale.balance)} balance</strong></div>)}</div></section></div>}
       {customerStatement.isError && statementCustomerId && <p role="alert" className="mb-3 text-xs text-rose-700">Customer statement could not be loaded.</p>}
       {settingsOpen && <div className="fixed inset-0 z-[75] grid place-items-center bg-slate-950/40 p-4"><section role="dialog" aria-modal="true" aria-label="Credit reminder settings" className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"><h2 className="font-bold">Credit reminder thresholds</h2><p className="mt-1 text-xs text-slate-500">Days are measured in Africa/Kampala calendar time. Use comma-separated whole days.</p><form onSubmit={(event) => { void saveReminderSettings(event) }} className="mt-4 space-y-3"><label className="block text-xs font-semibold">Days before due<input required value={settingsDraft.daysBeforeDue} onChange={(event) => setSettingsDraft({ ...settingsDraft, daysBeforeDue: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label><label className="block text-xs font-semibold">Days overdue for alerts<input required value={settingsDraft.daysAfterDue} onChange={(event) => setSettingsDraft({ ...settingsDraft, daysAfterDue: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label><label className="block text-xs font-semibold">Weekly repeats after escalation (days)<input required type="number" min="1" max="90" value={settingsDraft.repeatOverdueEveryDays} onChange={(event) => setSettingsDraft({ ...settingsDraft, repeatOverdueEveryDays: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label><label className="block text-xs font-semibold">Escalate to General Managers after (days overdue)<input required type="number" min="1" max="365" value={settingsDraft.escalateAfterDays} onChange={(event) => setSettingsDraft({ ...settingsDraft, escalateAfterDays: event.target.value })} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2" /></label>{settingsError && <p role="alert" className="text-xs text-rose-700">{settingsError}</p>}<div className="flex justify-end gap-2"><button type="button" disabled={settingsSaving} onClick={() => setSettingsOpen(false)} className="rounded border border-slate-200 px-3 py-2 text-xs">Cancel</button><button type="submit" disabled={settingsSaving} className="rounded bg-primary px-3 py-2 text-xs text-primary-foreground">{settingsSaving ? 'Saving…' : 'Save settings'}</button></div></form></section></div>}

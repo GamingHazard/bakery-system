@@ -18,6 +18,7 @@ describe("role-based section access", () => {
     expect(canAccessSection(["Human Resource"], "Attendance Management")).toBe(true);
     expect(canAccessSection(["Inventory Manager"], "Assets Management")).toBe(true);
     expect(canAccessSection(["Production Manager"], "Production Management")).toBe(true);
+    expect(canAccessSection(["Production Manager"], "Finished stock")).toBe(true);
     expect(canAccessSection(["Production Manager"], "Raw Material Management")).toBe(false);
     expect(canAccessSection(["Marketing Manager"], "Customer Management")).toBe(true);
     expect(canAccessSection(["Marketing Manager"], "Orders")).toBe(true);

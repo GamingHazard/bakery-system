@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
@@ -8,10 +8,12 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   Boxes,
+  ChevronDown,
   CircleDollarSign,
   ClipboardList,
   Download,
   Factory,
+  PackageCheck,
   PackageSearch,
   Plus,
   RefreshCw,
@@ -28,9 +30,24 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { getDashboardSummary, type DashboardAvailability, type UserRole } from '@/lib/user-api'
+import { canAccessSection } from '@/lib/authorization'
+import { summarizeFinishedProductInventory } from '@/lib/dashboard-inventory'
+import {
+  getDashboardSummary,
+  listBakeryProductFamilies,
+  listFinishedStockLots,
+  type DashboardAvailability,
+  type UserRole,
+} from '@/lib/user-api'
 
 type Period = 'today' | '7d' | '30d'
+type SalesPeriod = 'today' | 'week' | 'month'
+
+const salesPeriodLabels: Record<SalesPeriod, string> = {
+  today: 'Today',
+  week: 'This week',
+  month: 'This month',
+}
 
 function kampalaDate() {
   const values = new Intl.DateTimeFormat('en-CA', {
@@ -41,6 +58,15 @@ function kampalaDate() {
   }).formatToParts(new Date())
   const parts = Object.fromEntries(values.map(({ type, value }) => [type, value]))
   return `${parts.year}-${parts.month}-${parts.day}`
+}
+
+function salesPeriodStart(period: SalesPeriod, currentDate: string) {
+  if (period === 'month') return `${currentDate.slice(0, 7)}-01`
+  if (period === 'today') return currentDate
+
+  const date = new Date(`${currentDate}T00:00:00.000Z`)
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7))
+  return date.toISOString().slice(0, 10)
 }
 
 function previousDate(date: string, days: number) {
@@ -92,6 +118,67 @@ function SectionError({ section }: { section: DashboardAvailability | undefined 
   )
 }
 
+function SalesPeriodSelector({
+  period,
+  onChange,
+}: {
+  period: SalesPeriod
+  onChange: (period: SalesPeriod) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const closeOnOutsideClick = (event: PointerEvent) => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) setOpen(false)
+    }
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutsideClick)
+    document.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', closeOnOutsideClick)
+      document.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [open])
+
+  return (
+    <div ref={menuRef} className="relative -mr-1 -mt-1">
+      <button
+        type="button"
+        aria-label={`Sales period: ${salesPeriodLabels[period]}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+      >
+        {salesPeriodLabels[period]} <ChevronDown className={`size-3 transition-transform ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
+      </button>
+      {open && (
+        <div role="menu" aria-label="Sales period" className="absolute right-0 z-20 mt-1 min-w-32 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+          {(Object.keys(salesPeriodLabels) as SalesPeriod[]).map((option) => (
+            <button
+              key={option}
+              type="button"
+              role="menuitem"
+              aria-current={period === option ? 'true' : undefined}
+              onClick={() => {
+                onChange(option)
+                setOpen(false)
+              }}
+              className={`w-full rounded-md px-3 py-2 text-left text-xs font-medium ${period === option ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              {salesPeriodLabels[option]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SummaryCard({
   label,
   value,
@@ -100,6 +187,7 @@ function SummaryCard({
   tone,
   onClick,
   index,
+  control,
 }: {
   label: string
   value: string
@@ -108,7 +196,35 @@ function SummaryCard({
   tone: string
   onClick: () => void
   index: number
+  control?: ReactNode
 }) {
+  const details = (
+    <>
+      <div className="mt-4 text-2xl font-bold tracking-tight text-slate-900">{value}</div>
+      <div className="mt-1 text-xs font-semibold text-slate-600">{label}</div>
+      <div className="mt-2 text-[11px] text-slate-400">{detail}</div>
+    </>
+  )
+
+  if (control) {
+    return (
+      <article
+        className="group rounded-2xl border border-slate-200 bg-white shadow-sm transition duration-300 hover:-translate-y-1 hover:border-violet-200 hover:shadow-lg motion-reduce:transition-none motion-reduce:hover:translate-y-0 motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-3 motion-safe:duration-500"
+        style={{ animationDelay: `${index * 70}ms` }}
+      >
+        <div className="flex items-center justify-between px-5 pt-5">
+          <span className={`grid size-10 place-items-center rounded-xl ${tone}`}>
+            <Icon className="size-5" aria-hidden="true" />
+          </span>
+          {control}
+        </div>
+        <button type="button" onClick={onClick} className="w-full rounded-b-2xl px-5 pb-5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-violet-400">
+          {details}
+        </button>
+      </article>
+    )
+  }
+
   return (
     <button
       type="button"
@@ -122,9 +238,7 @@ function SummaryCard({
         </span>
         <ArrowUpRight className="size-4 text-slate-300 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-violet-600" aria-hidden="true" />
       </div>
-      <div className="mt-4 text-2xl font-bold tracking-tight text-slate-900">{value}</div>
-      <div className="mt-1 text-xs font-semibold text-slate-600">{label}</div>
-      <div className="mt-2 text-[11px] text-slate-400">{detail}</div>
+      {details}
     </button>
   )
 }
@@ -159,6 +273,7 @@ export default function DashboardOverview({
   onExportSales: () => void
 }) {
   const [period, setPeriod] = useState<Period>('7d')
+  const [salesPeriod, setSalesPeriod] = useState<SalesPeriod>('today')
   const [today, setToday] = useState('')
   const reducedMotion = useReducedMotion()
 
@@ -182,6 +297,38 @@ export default function DashboardOverview({
 
   const summary = query.data
   const sections = summary?.sections
+  const salesRange = useMemo(() => {
+    const end = today || kampalaDate()
+    return { from: salesPeriodStart(salesPeriod, end), to: end }
+  }, [salesPeriod, today])
+  const salesPeriodQuery = useQuery({
+    queryKey: ['dashboard-summary', roles, salesRange.from, salesRange.to],
+    queryFn: () => getDashboardSummary(salesRange.from, salesRange.to),
+    enabled: Boolean(today) && sectionAvailable(sections?.sales),
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 30_000,
+  })
+  const salesPeriodSection = sectionAvailable(salesPeriodQuery.data?.sections.sales)
+    ? salesPeriodQuery.data.sections.sales
+    : undefined
+  const canViewFinishedStock = canAccessSection(roles, 'Production Management')
+  const finishedInventoryQuery = useQuery({
+    queryKey: ['dashboard-finished-inventory', roles],
+    queryFn: async () => {
+      const [familyResult, lotResult] = await Promise.all([
+        listBakeryProductFamilies(),
+        listFinishedStockLots(),
+      ])
+      return summarizeFinishedProductInventory(familyResult.families, lotResult.lots)
+    },
+    enabled: canViewFinishedStock,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+    staleTime: 30_000,
+  })
   const metrics: Array<{
     label: string
     value: string
@@ -189,10 +336,27 @@ export default function DashboardOverview({
     icon: typeof TrendingUp
     tone: string
     target: string
+    control?: ReactNode
   }> = []
   if (sectionAvailable(sections?.sales)) {
     metrics.push(
-      { label: 'Sales revenue', value: money(sections.sales.revenue ?? 0), detail: `Collected ${money(sections.sales.collected ?? 0)}`, icon: CircleDollarSign, tone: 'bg-violet-50 text-violet-700', target: 'Sales' },
+      {
+        label: 'Sales revenue',
+        value: salesPeriodSection
+          ? money(salesPeriodSection.revenue ?? 0)
+          : salesPeriodQuery.isError
+            ? '—'
+            : '…',
+        detail: salesPeriodSection
+          ? `Collected ${money(salesPeriodSection.collected ?? 0)}`
+          : salesPeriodQuery.isError
+            ? `${salesPeriodLabels[salesPeriod]} sales could not be loaded`
+            : `Loading ${salesPeriodLabels[salesPeriod].toLowerCase()} sales…`,
+        icon: CircleDollarSign,
+        tone: 'bg-violet-50 text-violet-700',
+        target: 'Sales',
+        control: <SalesPeriodSelector period={salesPeriod} onChange={setSalesPeriod} />,
+      },
       { label: 'Outstanding receivables', value: money(sections.sales.outstanding ?? 0), detail: `All periods · ${sections.sales.overdueReceivables ?? 0} overdue accounts`, icon: ArrowDownRight, tone: 'bg-amber-50 text-amber-700', target: 'Sales' },
     )
   }
@@ -274,12 +438,21 @@ export default function DashboardOverview({
           </select>
           <button
             type="button"
-            onClick={() => void query.refetch()}
-            disabled={query.isFetching}
+            onClick={() => {
+              void query.refetch()
+              if (
+                sectionAvailable(sections?.sales) &&
+                (range.from !== salesRange.from || range.to !== salesRange.to)
+              ) {
+                void salesPeriodQuery.refetch()
+              }
+              if (canViewFinishedStock) void finishedInventoryQuery.refetch()
+            }}
+            disabled={query.isFetching || salesPeriodQuery.isFetching || finishedInventoryQuery.isFetching}
             aria-label="Refresh dashboard data"
             className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-60 motion-reduce:transition-none"
           >
-            <RefreshCw className={`size-3.5 ${query.isFetching && !reducedMotion ? 'animate-spin' : ''}`} aria-hidden="true" />
+            <RefreshCw className={`size-3.5 ${(query.isFetching || salesPeriodQuery.isFetching || finishedInventoryQuery.isFetching) && !reducedMotion ? 'animate-spin' : ''}`} aria-hidden="true" />
             Refresh
           </button>
         </div>
@@ -328,6 +501,72 @@ export default function DashboardOverview({
                   </button>
                 ))}
               </div>
+            </section>
+          )}
+
+          {canViewFinishedStock && (
+            <section aria-labelledby="dashboard-finished-inventory-title" className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 id="dashboard-finished-inventory-title" className="text-sm font-bold text-slate-900">Finished-product inventory</h3>
+                  <p className="mt-1 text-xs text-slate-500">Current finished goods across all locations · on-hand quantities</p>
+                </div>
+                <button type="button" onClick={() => onNavigate('Finished stock')} className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400">
+                  View finished stock <ArrowUpRight className="size-3.5" aria-hidden="true" />
+                </button>
+              </div>
+              {finishedInventoryQuery.isLoading ? (
+                <div aria-label="Loading finished-product inventory" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+                  {Array.from({ length: 5 }, (_, index) => <div key={index} className={`h-28 animate-pulse rounded-xl bg-slate-100 motion-reduce:animate-none ${index === 0 || index === 4 ? 'xl:col-span-2' : ''}`} />)}
+                </div>
+              ) : finishedInventoryQuery.isError && !finishedInventoryQuery.data ? (
+                <div role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-800">
+                  <p className="font-semibold">Finished-product inventory could not be loaded.</p>
+                  <p className="mt-1">Check your connection and retry. No inventory totals are shown until the data is available.</p>
+                  <button type="button" onClick={() => void finishedInventoryQuery.refetch()} className="mt-3 rounded-lg bg-white px-3 py-2 font-semibold text-rose-800 shadow-sm">Try again</button>
+                </div>
+              ) : finishedInventoryQuery.data ? (
+                <>
+                  {finishedInventoryQuery.isError && <p role="status" className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">Refresh failed. Showing the last successful inventory snapshot.</p>}
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
+                    <article className="rounded-xl border border-violet-100 bg-gradient-to-br from-violet-50 to-white p-4 xl:col-span-2">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-violet-800"><span className="grid size-8 place-items-center rounded-lg bg-white text-violet-700"><CircleDollarSign className="size-4" aria-hidden="true" /></span>Stock value</div>
+                      <p className="mt-3 text-2xl font-bold tracking-tight text-slate-900">{money(finishedInventoryQuery.data.stockValue)}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">Active SKUs · on-hand × selling price</p>
+                    </article>
+                    <article className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-amber-800"><AlertTriangle className="size-4" aria-hidden="true" />Low stock</div>
+                      <p className="mt-3 text-2xl font-bold tracking-tight text-slate-900">{finishedInventoryQuery.data.lowStockSkus.toLocaleString()}</p>
+                      <p className="mt-1 text-[11px] text-slate-600">In-stock SKUs at/below threshold</p>
+                    </article>
+                    <article className="rounded-xl border border-rose-200 bg-rose-50/60 p-4">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-rose-800"><PackageSearch className="size-4" aria-hidden="true" />Out of stock</div>
+                      <p className="mt-3 text-2xl font-bold tracking-tight text-slate-900">{finishedInventoryQuery.data.outOfStockSkus.toLocaleString()}</p>
+                      <p className="mt-1 text-[11px] text-slate-600">Active SKUs with no stock</p>
+                    </article>
+                    <article className="rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-emerald-800"><PackageCheck className="size-4" aria-hidden="true" />Available families</div>
+                      <p className="mt-3 text-2xl font-bold tracking-tight text-slate-900">{finishedInventoryQuery.data.availableFamilies.toLocaleString()}</p>
+                      <p className="mt-1 text-[11px] text-slate-600">Active families with active SKUs</p>
+                    </article>
+                    <article className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 xl:col-span-2">
+                      <div className="flex items-center gap-2 text-xs font-semibold text-slate-700"><Boxes className="size-4" aria-hidden="true" />Product catalog</div>
+                      <p className="mt-2 text-xl font-bold tracking-tight text-slate-900">{finishedInventoryQuery.data.totalProducts.toLocaleString()} <span className="text-xs font-medium text-slate-500">total products</span></p>
+                      <div className="mt-3 grid grid-cols-2 gap-3">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Product status</p>
+                          <p className="mt-1 text-xs text-slate-700"><span className="font-bold text-slate-900">{finishedInventoryQuery.data.activeProducts.toLocaleString()}</span> active <span className="text-slate-300">·</span> <span className="font-bold text-slate-900">{finishedInventoryQuery.data.inactiveProducts.toLocaleString()}</span> inactive</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Storefront</p>
+                          <p className="mt-1 text-xs text-slate-700"><span className="font-bold text-slate-900">{finishedInventoryQuery.data.publishedProducts.toLocaleString()}</span> published <span className="text-slate-300">·</span> <span className="font-bold text-slate-900">{finishedInventoryQuery.data.unpublishedProducts.toLocaleString()}</span> unpublished</p>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-[10px] text-slate-500">Counts are by product family; stock alerts remain by SKU.</p>
+                    </article>
+                  </div>
+                </>
+              ) : null}
             </section>
           )}
 

@@ -22,6 +22,9 @@ describe("app route mapping", () => {
     expect(pathForSection("Raw Material Management")).toBe(
       "/inventory/materials",
     );
+    expect(pathForSection("Finished stock")).toBe(
+      "/inventory/production?view=stock",
+    );
     expect(pathForSection("Security Settings")).toBe("/settings/security");
   });
 

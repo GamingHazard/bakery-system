@@ -41,6 +41,8 @@ const product = {
   unitsPerSaleUnit: 1,
   price: 24000,
   availableQuantity: 0,
+  lowStockThreshold: 10,
+  stockState: 'out_of_stock' as const,
 }
 
 function renderSales(mode: 'sales' | 'credit' = 'sales', state = cloneSeed()) {
@@ -108,6 +110,40 @@ function creditSale(): Sale {
   }
 }
 
+function currentKampalaDate() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Africa/Kampala',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  return `${parts.find(({ type }) => type === 'year')?.value}-${parts.find(({ type }) => type === 'month')?.value}-${parts.find(({ type }) => type === 'day')?.value}`
+}
+
+function bakerySale(lines: Array<{ variantId: string; packs: number }>): Sale {
+  return {
+    id: 'sale-this-week',
+    date: currentKampalaDate(),
+    customer: 'Bakery customer',
+    product: lines.map(({ variantId }) => variantId).join(', '),
+    quantity: lines.reduce((total, line) => total + line.packs, 0),
+    total: 24000,
+    status: 'Paid',
+    method: 'Cash',
+    reference: 'SAL-THIS-WEEK',
+    lines: lines.map(({ variantId, packs }) => ({
+      variantId,
+      productCode: variantId,
+      productName: variantId,
+      packs,
+      quantityPieces: packs,
+      catalogPricePerPack: 1000,
+      pricePerPack: 1000,
+      lineTotal: packs * 1000,
+    })),
+  }
+}
+
 describe('sales stock guard', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -172,6 +208,64 @@ describe('sales stock guard', () => {
     expect(orders.textContent).toContain('ORD-urgent')
     expect(orders.textContent).toContain('High priority')
     expect(orders.textContent).not.toContain('ORD-oldest')
+  })
+
+  it('previews the two top-selling SKUs and shows all active stock states in the dialog', async () => {
+    const stocked = {
+      ...product,
+      id: 'stocked-variant',
+      sku: 'STOCKED',
+      name: 'Stocked loaf',
+      availableQuantity: 15,
+      lowStockThreshold: 10,
+      stockState: 'stocked' as const,
+    }
+    const low = {
+      ...product,
+      id: 'low-variant',
+      sku: 'LOW',
+      name: 'Low loaf',
+      availableQuantity: 5,
+      lowStockThreshold: 10,
+      stockState: 'low_stock' as const,
+    }
+    const out = {
+      ...product,
+      id: 'out-variant',
+      sku: 'OUT',
+      name: 'Out loaf',
+      availableQuantity: 0,
+      stockState: 'out_of_stock' as const,
+    }
+    salesApi.listBakeryOrderCatalog.mockResolvedValue([low, out, stocked])
+    const state = {
+      ...cloneSeed(),
+      sales: [bakerySale([
+        { variantId: low.id, packs: 5 },
+        { variantId: out.id, packs: 20 },
+        { variantId: stocked.id, packs: 8 },
+      ])],
+    }
+    renderSales('sales', state)
+
+    const topSellers = await screen.findByRole('list', { name: 'Top-selling bakery products this week' })
+    await waitFor(() => expect(topSellers.querySelectorAll('li')).toHaveLength(2))
+    expect(topSellers.textContent).toContain('Out loaf')
+    expect(topSellers.textContent).toContain('Stocked loaf')
+    expect(topSellers.textContent).not.toContain('Low loaf')
+
+    fireEvent.click(screen.getByRole('button', { name: 'See all' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Bakery stock availability' })
+    expect(dialog.textContent).toContain('Stocked loaf')
+    expect(dialog.textContent).toContain('Low stock at 10 loaf')
+    fireEvent.click(screen.getByRole('tab', { name: /Low stock/ }))
+    expect(dialog.textContent).toContain('Low loaf')
+    expect(dialog.textContent).not.toContain('Out loaf')
+    fireEvent.click(screen.getByRole('tab', { name: /Out of stock/ }))
+    expect(dialog.textContent).toContain('Out loaf')
+    expect(dialog.textContent).not.toContain('Low loaf')
+    fireEvent.keyDown(document, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Bakery stock availability' })).toBeNull())
   })
 
   it('shows the oldest pending order when none has high priority', async () => {

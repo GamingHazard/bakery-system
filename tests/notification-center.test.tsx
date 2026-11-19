@@ -104,6 +104,23 @@ describe('notification center', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 
+  it('routes bakery stock notifications to Production Management', async () => {
+    const stockNotification = {
+      ...notification,
+      resource: { type: 'bakery_product_variant', id: 'variant-1', reference: 'LOAF-1' },
+    }
+    notificationApi.listNotifications.mockResolvedValue({
+      notifications: [stockNotification],
+      unreadCount: 1,
+      nextCursor: null,
+    })
+    const onNavigate = vi.fn()
+    renderCenter(onNavigate)
+    fireEvent.click(await screen.findByRole('button', { name: /Notifications/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Expense needs approval/ }))
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith('Production Management'))
+  })
+
   it('marks all notifications read and closes on Escape', async () => {
     renderCenter()
     const trigger = await screen.findByRole('button', { name: /Notifications/ })

@@ -190,7 +190,10 @@ export default function BakeryProductionManagement({ canManage, canManageInvento
     return !search || [movement.date, movement.lotReference, movement.sku, movement.productName, movement.type, movement.reason ?? '']
       .some((value) => value.toLocaleLowerCase().includes(search))
   })
-  const refresh = () => client.invalidateQueries({ queryKey: key })
+  const refresh = () => Promise.all([
+    client.invalidateQueries({ queryKey: key }),
+    client.invalidateQueries({ queryKey: ['dashboard-finished-inventory'] }),
+  ])
   const openCreateProduct = () => {
     setMessage('')
     setProductDrawerMode('create')
@@ -579,6 +582,7 @@ export default function BakeryProductionManagement({ canManage, canManageInvento
       input: {
         name: String(form.get('name')).trim(),
         price: Number(form.get('price')),
+        lowStockThreshold: Number(form.get('lowStockThreshold')),
       },
     })
   }
@@ -859,6 +863,10 @@ export default function BakeryProductionManagement({ canManage, canManageInvento
                       <input type="hidden" name="variantId" value={variant.id} />
                       <input aria-label={`Variant name ${variant.sku}`} name="name" defaultValue={variant.name} maxLength={160} className="w-32 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs" />
                       <input aria-label={`Variant price ${variant.sku}`} name="price" type="number" min="1" step="1" defaultValue={variant.price} className="w-24 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs" />
+                      <label className="flex items-center gap-1 text-[10px] font-medium text-slate-500">Low stock at
+                        <input aria-label={`Low-stock threshold for ${variant.sku}`} name="lowStockThreshold" type="text" inputMode="numeric" pattern="[0-9]+" required defaultValue={variant.lowStockThreshold ?? 10} className="w-16 rounded border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800" />
+                        {variant.saleUnit}
+                      </label>
                       <button type="submit" disabled={busy} className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold disabled:opacity-40">Save</button>
                     </form>
                     <button type="button" disabled={busy} onClick={() => updateVariant.mutate({ id: variant.id, input: { active: !variant.active } })} className="rounded border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold disabled:opacity-40">{variant.active ? 'Deactivate' : 'Activate'}</button>

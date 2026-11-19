@@ -203,6 +203,8 @@ describe('orders-management', () => {
       unitsPerSaleUnit: 1,
       price: 12000,
       availableQuantity: 0,
+      lowStockThreshold: 10,
+      stockState: 'out_of_stock',
     }])
     renderOrders()
 

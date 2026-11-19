@@ -78,11 +78,12 @@ const familyWithImage: BakeryProductFamily = {
 
 function renderBakeryProduction(options: { canManage?: boolean; canManageInventory?: boolean } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <BakeryProductionManagement canManage={options.canManage ?? true} canManageInventory={options.canManageInventory ?? false} onBack={vi.fn()} />
     </QueryClientProvider>,
   )
+  return { ...view, client }
 }
 
 async function openView(label: string) {
@@ -384,12 +385,15 @@ describe('bakery product profile image', () => {
         saleUnit: 'loaf',
         unitsPerSaleUnit: 1,
         price: 5000,
+        lowStockThreshold: 10,
         active: true,
       }],
     }
     imageApi.listBakeryProductFamilies.mockResolvedValue({ families: [familyWithVariant] })
 
-    renderBakeryProduction({ canManageInventory: true })
+    const { client } = renderBakeryProduction({ canManageInventory: true })
+    const inventoryQueryKey = ['dashboard-finished-inventory', ['General Manager']]
+    client.setQueryData(inventoryQueryKey, { stockValue: 0 })
     await openView('Finished stock')
     const receiptForm = (await screen.findByRole('heading', { name: 'Receive bakery finished stock' })).closest('form')
     if (!receiptForm) throw new Error('Manual receipt form was not rendered.')
@@ -414,6 +418,7 @@ describe('bakery product profile image', () => {
       reason: 'Supplier return accepted',
       idempotencyKey: expect.stringMatching(/^BAKERY-RECEIPT/),
     })))
+    await waitFor(() => expect(client.getQueryState(inventoryQueryKey)?.isInvalidated).toBe(true))
   })
 
   it('shows the tabbed overview by default with one active panel', async () => {

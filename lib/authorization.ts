@@ -45,6 +45,7 @@ export function hasAnyDepartmentRole(roles: readonly UserRole[], requiredRoles: 
 }
 
 export function canAccessSection(roles: readonly UserRole[], section: string) {
+  if (section === 'Finished stock') section = 'Production Management'
   if (section === 'Employee Profile Details') section = 'Employee Profiles'
   if (section === 'Customer Details') section = 'Customer Management'
   if (roles.includes('Super Admin')) return true

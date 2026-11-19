@@ -312,6 +312,8 @@ export type BakeryOrderCatalogItem = {
   unitsPerSaleUnit: number;
   price: number;
   availableQuantity: number;
+  lowStockThreshold: number;
+  stockState: "stocked" | "low_stock" | "out_of_stock";
 };
 
 const apiBaseUrl = (
@@ -810,6 +812,7 @@ export type BakeryProductVariant = {
   saleUnit: string;
   unitsPerSaleUnit: number;
   price: number;
+  lowStockThreshold: number;
   packagingMaterials?: Array<{
     materialId: string;
     materialName: string;
@@ -970,6 +973,7 @@ export async function createBakeryProductFamily(input: {
     saleUnit: string;
     unitsPerSaleUnit: number;
     price: number;
+    lowStockThreshold?: number;
     packagingMaterials?: Array<{ materialId: string; quantityPerSaleUnit: number }>;
   }>;
   storefront?: Partial<Omit<BakeryProductFamily["storefront"], "firstPublishedAt">>;
@@ -1011,7 +1015,7 @@ export async function updateBakeryProductFamily(
 
 export async function updateBakeryProductVariant(
   id: string,
-  input: Partial<Pick<BakeryProductVariant, "name" | "price" | "active">>,
+  input: Partial<Pick<BakeryProductVariant, "name" | "price" | "lowStockThreshold" | "active">>,
 ) {
   return request<{ variant: BakeryProductVariant }>(
     `/production/bakery/variants/${encodeURIComponent(id)}`,
@@ -2123,6 +2127,9 @@ export async function listBakeryOrderCatalog() {
     typeof product.sku !== "string" ||
     typeof product.name !== "string" ||
     typeof product.saleUnit !== "string" ||
+    !Number.isSafeInteger(product.lowStockThreshold) ||
+    product.lowStockThreshold < 0 ||
+    !["stocked", "low_stock", "out_of_stock"].includes(product.stockState) ||
     !Number.isSafeInteger(product.unitsPerSaleUnit) ||
     product.unitsPerSaleUnit < 1 ||
     !Number.isSafeInteger(product.price) ||

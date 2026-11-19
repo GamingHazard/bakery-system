@@ -19,6 +19,7 @@ const routesBySection: Record<string, string> = {
   Expenses: "/expenses",
   "Raw Material Management": "/inventory/materials",
   "Production Management": "/inventory/production",
+  "Finished stock": "/inventory/production?view=stock",
   "Assets Management": "/inventory/assets",
   "Data Backup": "/inventory/data-backup",
   "Company Profile Management": "/settings/company",
