@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
-const apiProxyTarget = process.env.API_PROXY_TARGET?.replace(/\/+$/, '')
+const apiProxyTarget = process.env.API_PROXY_TARGET
+  ?.replace(/\/+$/, '')
+  .replace(/\/api$/i, '')
 
 const nextConfig = {
   typescript: {
