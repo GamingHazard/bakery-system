@@ -744,6 +744,15 @@ export type CompanyProfile = {
   registrationAuthority: string;
   logo: { url: string; publicId: string };
   publicContacts: { email: boolean; phone: boolean; address: boolean };
+  socialLinks: {
+    instagram: string;
+    facebook: string;
+    tiktok: string;
+    youtube: string;
+    whatsapp: string;
+    linkedin: string;
+    x: string;
+  };
 };
 export type ErpState = {
   sales: Sale[];
@@ -783,6 +792,15 @@ export const emptyCompanyProfile: CompanyProfile = {
   registrationAuthority: "",
   logo: { url: "", publicId: "" },
   publicContacts: { email: false, phone: false, address: false },
+  socialLinks: {
+    instagram: "",
+    facebook: "",
+    tiktok: "",
+    youtube: "",
+    whatsapp: "",
+    linkedin: "",
+    x: "",
+  },
 };
 
 const normalizeCompanyProfile = (value: unknown): CompanyProfile => {
@@ -798,8 +816,13 @@ const normalizeCompanyProfile = (value: unknown): CompanyProfile => {
     profile.publicContacts && typeof profile.publicContacts === "object"
       ? (profile.publicContacts as Record<string, unknown>)
       : {};
+  const socialLinks =
+    profile.socialLinks && typeof profile.socialLinks === "object"
+      ? (profile.socialLinks as Record<string, unknown>)
+      : {};
   const textFields = Object.keys(emptyCompanyProfile).filter(
-    (key) => key !== "logo" && key !== "publicContacts",
+    (key) =>
+      key !== "logo" && key !== "publicContacts" && key !== "socialLinks",
   );
   return {
     ...Object.fromEntries(
@@ -825,6 +848,20 @@ const normalizeCompanyProfile = (value: unknown): CompanyProfile => {
         typeof publicContacts.address === "boolean"
           ? publicContacts.address
           : false,
+    },
+    socialLinks: {
+      instagram:
+        typeof socialLinks.instagram === "string" ? socialLinks.instagram : "",
+      facebook:
+        typeof socialLinks.facebook === "string" ? socialLinks.facebook : "",
+      tiktok: typeof socialLinks.tiktok === "string" ? socialLinks.tiktok : "",
+      youtube:
+        typeof socialLinks.youtube === "string" ? socialLinks.youtube : "",
+      whatsapp:
+        typeof socialLinks.whatsapp === "string" ? socialLinks.whatsapp : "",
+      linkedin:
+        typeof socialLinks.linkedin === "string" ? socialLinks.linkedin : "",
+      x: typeof socialLinks.x === "string" ? socialLinks.x : "",
     },
   } as CompanyProfile;
 };

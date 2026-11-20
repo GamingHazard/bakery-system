@@ -14,8 +14,19 @@ type Props = {
 const fieldClass = 'mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-primary focus:ring-2 focus:ring-ring/20'
 const labelClass = 'block text-xs font-semibold text-slate-600'
 
-type CompanyTextField = Exclude<keyof CompanyProfile, 'logo' | 'publicContacts'>
+type CompanyTextField = Exclude<keyof CompanyProfile, 'logo' | 'publicContacts' | 'socialLinks'>
 type PublicContactField = keyof CompanyProfile['publicContacts']
+type SocialPlatform = keyof CompanyProfile['socialLinks']
+
+const socialPlatforms: { key: SocialPlatform; label: string; placeholder: string }[] = [
+  { key: 'instagram', label: 'Instagram', placeholder: 'https://instagram.com/yourprofile' },
+  { key: 'facebook', label: 'Facebook', placeholder: 'https://facebook.com/yourpage' },
+  { key: 'tiktok', label: 'TikTok', placeholder: 'https://tiktok.com/@yourprofile' },
+  { key: 'youtube', label: 'YouTube', placeholder: 'https://youtube.com/@yourchannel' },
+  { key: 'whatsapp', label: 'WhatsApp', placeholder: 'https://wa.me/256700000000' },
+  { key: 'linkedin', label: 'LinkedIn', placeholder: 'https://linkedin.com/company/yourcompany' },
+  { key: 'x', label: 'X', placeholder: 'https://x.com/yourprofile' },
+]
 
 export default function CompanyProfileManagement({ profile, canEdit, onSave }: Props) {
   const [values, setValues] = useState<CompanyProfile>(profile)
@@ -55,6 +66,15 @@ export default function CompanyProfileManagement({ profile, canEdit, onSave }: P
     setErrorMessage('')
   }
 
+  const updateSocialLink = (key: SocialPlatform, value: string) => {
+    setValues((current) => ({
+      ...current,
+      socialLinks: { ...current.socialLinks, [key]: value },
+    }))
+    setSaveMessage('')
+    setErrorMessage('')
+  }
+
   const cancel = () => {
     setValues(profile)
     setLogoFile(null)
@@ -89,6 +109,15 @@ export default function CompanyProfileManagement({ profile, canEdit, onSave }: P
       registrationNumber: values.registrationNumber.trim(),
       registrationAuthority: values.registrationAuthority.trim(),
       publicContacts: { ...values.publicContacts },
+      socialLinks: {
+        instagram: values.socialLinks.instagram.trim(),
+        facebook: values.socialLinks.facebook.trim(),
+        tiktok: values.socialLinks.tiktok.trim(),
+        youtube: values.socialLinks.youtube.trim(),
+        whatsapp: values.socialLinks.whatsapp.trim(),
+        linkedin: values.socialLinks.linkedin.trim(),
+        x: values.socialLinks.x.trim(),
+      },
     }
     let profileTextSaved = false
     try {
@@ -251,6 +280,27 @@ export default function CompanyProfileManagement({ profile, canEdit, onSave }: P
                     className="mt-0.5 size-4 rounded border-slate-300 text-primary focus:ring-ring/30"
                   />
                   <span>{label}</span>
+                </label>
+              ))}
+            </div>
+          </section>
+
+          <section aria-labelledby="company-social-links-title" className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-100 px-5 py-4"><h3 id="company-social-links-title" className="text-sm font-bold text-slate-900">Social media links</h3><p className="mt-1 text-xs text-slate-500">Add HTTPS profile URLs to publish them in the website footer and contact page. Leave a platform blank to hide it.</p></div>
+            <div className="grid gap-4 p-5 sm:grid-cols-2">
+              {socialPlatforms.map(({ key, label, placeholder }) => (
+                <label key={key} className={labelClass}>
+                  {label}
+                  <input
+                    name={`socialLinks.${key}`}
+                    type="url"
+                    maxLength={300}
+                    disabled={!canEdit || saving}
+                    value={values.socialLinks[key]}
+                    onChange={(event) => updateSocialLink(key, event.target.value)}
+                    placeholder={placeholder}
+                    className={fieldClass}
+                  />
                 </label>
               ))}
             </div>
